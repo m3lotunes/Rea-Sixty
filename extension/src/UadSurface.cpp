@@ -474,7 +474,10 @@ void Surface::paint(std::int64_t now, Out& out)
                 vu[i * 2 + 1] = mt[1].level <= -77.0 ? 0 : dbToVuByte_(mt[1].clip ? 0.0 : mt[1].level);
             }
         } else {
+            // An empty strip: dark, its fader down, as Rea-Sixty's own blank strips.
             v.chanNum = " ";
+            v.drive   = true;
+            v.faderPb = 0;
         }
         // The soft key above the strip: its function in the current soft-key bank.
         static const char* const kModes[3] = {"PAN", "SEND", "INPUTS"};

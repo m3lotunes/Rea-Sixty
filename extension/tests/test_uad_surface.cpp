@@ -182,6 +182,7 @@ int main()
         EXPECT(r.uf8.upper[0] == "ADAT 7" && r.uf8.upper[2] == "REAPER" && r.uf8.upper[3] == "VoX Retu");
         EXPECT(r.uf8.upper[4] == "AUX 1" && r.uf8.upper[5] == "AUX 2" && r.uf8.upper[6].empty());
         EXPECT(r.uf8.csType[4] == "AUX" && r.uf8.chanNum[4] == "13" && r.uf8.chanNum[6] == " ");
+        EXPECT(r.uf8.motorPb[6] == 0 && r.uf8.motorPb[7] == 0);          // empty strips: fader down
         EXPECT(r.uf8.global(uf8::Uf8GlobalLed::BankRight) == uf8sim::Lamp::Off
                && r.uf8.global(uf8::Uf8GlobalLed::BankLeft) == uf8sim::Lamp::Dim);
         // an aux fader writes the aux
