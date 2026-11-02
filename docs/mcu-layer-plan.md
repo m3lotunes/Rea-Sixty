@@ -120,8 +120,7 @@ Handbuch, sie stammen aus der MCU-Spezifikation [W21].
   gewählten Spur [S. 129 f.].
 - **PAGE ◄ ►:** vorherige/nächste Parameterseite bzw. Send. Im PAN-Modus wählen sie die
   vorherige/nächste Spur [S. 128].
-- **FINE/SHIFT = SHIFT** (mehrere Spuren solo, Gruppe auf/zu mit SEL) [S. 128]. Daran hängt das
-  Alt-Monitor-Mapping des Nutzers (2.5).
+- **FINE/SHIFT = SHIFT** (mehrere Spuren solo, Gruppe auf/zu mit SEL) [S. 128].
 - **Automation:**
   - Es gelten OFF, READ, WRITE, LATCH und TOUCH. TRIM gilt nicht.
   - OFF = Automation wiederherstellen [S. 128].
@@ -240,13 +239,46 @@ sind virtuelle Endpunkte von SSL360Core. Deshalb findet UAMC heute keinen Mackie
   (0x46), Velocity 127, Kanal 1, von „SSL V-MIDI Port 9 Source“, Quell-ID 1821581804.**
 - SSL 360° hat für Port 9 dieselbe ID gespeichert. SSL vergibt also feste IDs, und UAMC merkt sich
   Mappings über diese ID.
-- 0x46 ist MCU **SHIFT**. Im Bitwig-Profil liegt SHIFT auf der UF8-Taste **FINE/SHIFT** [Hb S. 128].
-  Der Nutzer hat also FINE/SHIFT auf Layer 3 als Alt-Monitor-Taste benutzt.
+- 0x46 ist im MCU-Standard **SHIFT**. **Welche UF8-Taste die Note 70 geschickt hat, ist offen:**
+  - **Kandidat 1:** Die Soft-Key-Taste „ALT“ (Bank 1, Taste 1). Ihr Label deutet auf die
+    Alt-Monitor-Taste. Belegt ist sie mit dem SSL-Befehl `AssignPanSur`, und der sendet im
+    MCU-Standard 0x2A, nicht 0x46. Dann hätte SSLs Bitwig-Profil eine eigene Notenzuordnung.
+  - **Kandidat 2:** FINE/SHIFT, die im Bitwig-Profil SHIFT sendet [Hb S. 128].
+  - Klären lässt sich das nur mit dem Mitschnitt (8 A).
 - **Folgen:**
-  - FINE muss auf dem MCU-Layer 0x46 senden, nicht 0x49 wie im Logic-Profil.
+  - Die Taste, die der Nutzer als „ALT“ bedient (Soft-Key Bank 1 Taste 1), **sendet auf dem
+    MCU-Layer Note 70**. Dann greift sein UAMC-Mapping, egal was SSL intern tat.
   - „Rea-Sixty MCU“ braucht eine eigene feste ID.
   - Das Alt-Monitor-Mapping muss in UAMC einmal auf den neuen Port umgehängt werden. Die SSL-ID zu
     übernehmen wäre falsch, sie kollidiert, sobald SSL 360° läuft.
+
+**Die Layer-3-Belegung des Nutzers in SSL 360°** (Port 9, Bitwig, `LayerOption 14`, AutoSave =
+`Melostalker.xml`; Tabellen auf dem Mac unter `~/ReaSixty-MCU/collected/ssl/`):
+
+| Bereich | Taste | SSL-Befehl | Label des Nutzers | Bedeutung in UAMC (2.1) [vermutet] |
+|---|---|---|---|---|
+| V-POT-Bank | 1 | AssignPanSur | – (orange) | PAN |
+| | 2 | AssignSend | – | SEND |
+| | 3 | AssignPlugin | – | PLUG-IN = Inserts |
+| | 4 | AssignEQ | **INPUTS** | EQ = Preamp + Unison |
+| | 5 | Bitwig.TrackRemotes | **GAIN** | wohl INSTRUMENT = Gains |
+| | 6–8 | – (aus) | | |
+| Bank 1 | 1 | AssignPanSur | **ALT** | Alt-Monitor (Mapping auf Note 70) |
+| | 2–8 | – (aus) | | |
+| Bank 2–5 | alle | – (aus/leer) | | |
+| Quick | 1 | GlobalView | – | GLOBAL |
+| | 2 | Bitwig.InsSslPlugin | **AUX** | wohl Global View AUX |
+| | 3 | – (aus) | | |
+| Fussschalter | 1 / 2 | Stop/Play, Rec | – | Werk |
+
+- SEND/PLUG-IN und Automation stehen auf User-Modus, aber ohne Belegung. Auf Layer 3 waren sie
+  also ohne Funktion.
+- Pan/Send auto-fine sind aus.
+- Im SSL-Log steht nichts zu Handshake oder Device Query. Port 9 lief als „Bitwig Master“, die
+  Ports 10–12 als „Bitwig Extender“.
+- **Das ist die eigentliche Vorlage für die erste Version:** Der Nutzer hatte die UF8 schon auf
+  UAMC zugeschnitten (INPUTS, GAIN, AUX, ALT). Wir bauen dieselbe Bedienung, mit den MCU-Noten, die
+  UAMC für diese Funktionen erwartet. SSLs interne Bitwig-Noten brauchen wir dafür nicht.
 
 **UAMC-Ports heute** (alle aktiv, `order` 0):
 
@@ -333,11 +365,16 @@ anderes tut.
 Vorlage ist das Logic-Profil von SSL (2.3), angepasst an das, was UAMC nutzt (2.1). Alles, was
 nicht aus dem Handbuch kommt, ist ein Vorschlag und steht unter den Entscheiden (Abschnitt 7).
 
-**Korrektur nach der Mac-Inspektion (2.5):** Der Nutzer hatte das **Bitwig**-Profil (2.3a). Daraus
-folgt mindestens: **FINE/SHIFT sendet SHIFT 0x46**, nicht ALT 0x49. Daran hängt sein
-Alt-Monitor-Mapping in UAMC. Die V-POT-Bank folgt der Bitwig-Reihenfolge, so weit die MCU-Noten
-dafür bekannt sind. Die Logic-Spalten unten bleiben als Rückfall stehen, bis der Mitschnitt
-(8 A) die Bitwig-Noten zeigt.
+**Korrektur nach der Mac-Inspektion (2.5):** Der Nutzer hatte das **Bitwig**-Profil (2.3a) und
+darauf seine eigene UAMC-Belegung (Tabelle in 2.5). Die erste Version folgt **dieser** Belegung:
+
+- V-POT-Bank: PAN, SEND, PLUG-IN, INPUTS (= EQ 0x2C), GAIN (= INSTRUMENT 0x2D).
+- Soft-Key Bank 1 Taste 1 „ALT“ = Note 70.
+- QUICK 1 = GLOBAL 0x33, QUICK 2 „AUX“ = Global View AUX 0x42.
+- FINE = SHIFT 0x46 (Bitwig).
+
+Die Logic-Spalten unten bleiben als Rückfall stehen. Was davon UAMC wirklich auswertet, zeigt der
+Mitschnitt oder die Sonde (8 A / B2).
 
 ### 4.1 Strips (UF8 → MCU)
 
@@ -364,7 +401,7 @@ Die UF8-IDs stammen aus `docs/buttons-leds-quickref.md`, die MCU-Nummern aus [W2
 | PLUGIN (0x50) | PLUG-IN 0x2B | Hb S. 45 |
 | CHANNEL (0x51) | ? Vorschlag TRACK 0x28 | Entscheid 4 |
 | SEND/PLUG-IN 1–8 (0x48–4F) | ? Vorschlag Global View 0x3E–45 | Entscheid 3 |
-| FINE (0x6F) | **SHIFT 0x46** (Bitwig, Hb S. 128; das Alt-Monitor-Mapping des Nutzers hängt daran). Logic hätte ALT/CMD 0x49 | Mac 2.5 |
+| FINE (0x6F) | **SHIFT 0x46** (Bitwig, Hb S. 128). Logic hätte ALT/CMD 0x49 | Hb, Mac 2.5 |
 | Automation OFF/READ/WRITE/TRIM/LATCH/TOUCH (0x58–5D) | –/0x4A/0x4B/0x4C/0x4E/0x4D | Hb S. 44; OFF hat in MCU keine eigene Note [vermutet: READ/OFF teilen sich 0x4A] |
 | Zoom-Kreuz ↑ ↓ ← → (0x7A/7E/7B/7D) | Cursor 0x60/61/62/63 | Hb S. 45 |
 | Zoom-Mitte ◯ (0x7C) | ZOOM 0x64 | Hb S. 43 |
