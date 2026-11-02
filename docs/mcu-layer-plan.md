@@ -137,7 +137,16 @@ Handbuch, sie stammen aus der MCU-Spezifikation [W21].
 - **User Bank 3–5:** frei [S. 132].
 - **LCD:** UpLCD = 6 Zeichen Spurname, LowLCD = Wert. Beim Fader-Bewegen zeigt LowLCD dB [S. 124 f.].
 - **Welche MCU-Note** SSL für EQ+, TRACK REMOTES, PROJECT REMOTES, CLIP LAUNCHER und für
-  SEND/PLUG-IN 1–8 sendet, steht nicht im Handbuch. Messen (Abschnitt 8 A).
+  SEND/PLUG-IN 1–8 sendet, steht nicht im Handbuch.
+  - **Aus keinem Handbuch zu lesen:** Bitwig wird über **Bitwigs eigene Erweiterung „SSL UF8/UF1
+    by Bitwig v1.0“** angebunden, nicht über ein offenes Skript [S. 123]. Das Handbuch nennt nur,
+    was eine Taste *in Bitwig* tut. Welche Note SSL 360° dafür sendet, legen SSL und Bitwig unter
+    sich fest. Das SSL-Log nennt das Protokoll „McuBitwig“, also MCU mit SSLs Belegung.
+  - **Wir brauchen diese Noten aber nicht** (Entscheid 02.11.). UAMC versteht Standard-MCU, denn es
+    läuft mit X-Touch, FaderPort und anderen. Die Labels des Nutzers (INPUTS, GAIN, AUX, ALT, 2.5)
+    sagen, welche UAMC-Funktion er auf welcher Taste benutzt hat. Wir senden für genau diese
+    Funktion die Standard-MCU-Note. Der einzige Fall, der an SSLs Note hing (Alt-Monitor = Note 70),
+    ist gelöst: Die ALT-Taste sendet Note 70.
 
 ### 2.4 Die UF8 und Rea-Sixty heute [Code]
 
@@ -527,7 +536,10 @@ Alle vier annehmen. Wenn wir selbst senden: 0x14.
 
 ## 8. Zuerst messen
 
-**A. Mitschnitt der alten Lösung (wichtigste Messung).** SSL 360° mit Layer 3 auf dem alten Profil,
+**A. Mitschnitt der alten Lösung (optional, seit 02.11.).** Die Tastenbelegung kommt aus den
+Labels des Nutzers (2.3a), nicht aus SSLs Noten. Der Mitschnitt bestätigt nur noch. Was UAMC
+sendet, zeigt auch die Sonde (B2) oder das Protokoll des Layers selbst beim ersten Test.
+SSL 360° mit Layer 3 auf dem alten Profil,
 UAMC im Mackie-Modus an Port 9, MIDI Monitor (Snoize):
 
 1. *Sources*: „SSL V-MIDI Port 9 Source“ anhaken.
