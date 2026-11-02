@@ -213,8 +213,8 @@ Socket und REAPER kommen zuletzt dazu.
 | Baustein | Inhalt | Stand |
 |---|---|---|
 | A | `UadProto.h`, `uad_engine_probe`, Protokoll-Referenz | **gebaut 02.11.** |
-| B | `UadModel`: Baum und Updates lesen, Kanalliste, Monitor. Dazu eine virtuelle Engine (`UadSim.h`), gefüttert mit dem gemessenen Baum | |
-| C | `UadSurface`: UF8 ↔ Modell und Schreibbefehle, Erlaubt-Liste, Bündelung, Echo-Sperre. Getestet gegen virtuelle UF8 und virtuelle Engine. Das ist der Abnahmetest ohne Studio | |
+| B | `UadModel`: Baum und Updates lesen, Kanalliste, Monitor. Dazu eine virtuelle Engine (`UadSim.h`), gefüttert mit dem gemessenen Baum | **gebaut 02.11.**, `test_uad_model` |
+| C | `UadSurface`: UF8 ↔ Modell und Schreibbefehle, Erlaubt-Liste, Bündelung, Echo-Sperre. Getestet gegen virtuelle UF8 und virtuelle Engine. Das ist der Abnahmetest ohne Studio | **gebaut 02.11.**, `test_uad_surface` (11 Szenarien) |
 | D | `UadClient`: Socket-Thread, Wiederverbinden, Abos je Bank | |
 | E | Rea-Sixty-Anschluss: Eintritt (Entscheid 1), Settings, Apollo-Builtins, Handbuch | |
 | F | UF1 als Monitor-Controller | |
