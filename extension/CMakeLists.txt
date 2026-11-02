@@ -902,6 +902,11 @@ if(NOT WIN32)
     add_executable(test_uad_proto tests/test_uad_proto.cpp)
     target_include_directories(test_uad_proto PRIVATE src)
     add_test(NAME uad_proto COMMAND test_uad_proto)
+    # The mixer read from the engine's replies, against a virtual engine built
+    # from the tree measured on the user's Mac (UadModel.cpp, UadSim.h).
+    add_executable(test_uad_model tests/test_uad_model.cpp src/UadModel.cpp)
+    target_include_directories(test_uad_model PRIVATE src "${WDL_DIR}")
+    add_test(NAME uad_model COMMAND test_uad_model)
     # The MIDI CC layer in bindings.json: kind, CC set, presets, ccLayerActive.
     add_executable(test_midi_cc_bindings tests/test_midi_cc_bindings.cpp
         src/Bindings.cpp src/KeyMacro.cpp src/LogPath.cpp)
