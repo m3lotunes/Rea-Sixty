@@ -897,6 +897,11 @@ if(NOT WIN32)
     add_executable(test_midi_cc_layer tests/test_midi_cc_layer.cpp)
     target_include_directories(test_midi_cc_layer PRIVATE src)
     add_test(NAME midi_cc_layer COMMAND test_midi_cc_layer)
+    # MCU layer: faders and V-Pots out, the stream in, LCD, rings, meters, LEDs,
+    # handshake, the UF8 key table (McuLayer.h, docs/mcu-layer-plan.md).
+    add_executable(test_mcu_layer tests/test_mcu_layer.cpp)
+    target_include_directories(test_mcu_layer PRIVATE src)
+    add_test(NAME mcu_layer COMMAND test_mcu_layer)
     # The MIDI CC layer in bindings.json: kind, CC set, presets, ccLayerActive.
     add_executable(test_midi_cc_bindings tests/test_midi_cc_bindings.cpp
         src/Bindings.cpp src/KeyMacro.cpp src/LogPath.cpp)
