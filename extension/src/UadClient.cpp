@@ -173,6 +173,7 @@ void Side::enable(bool on, std::uint16_t port)
         client_.start(port);
         return;
     }
+    if (!client_.running()) return;          // called every tick: nothing to stop
     client_.stop();
     std::lock_guard<std::mutex> lk(mx_);
     model_ = uad::Model{};

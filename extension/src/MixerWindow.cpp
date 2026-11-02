@@ -330,6 +330,7 @@ constexpr SearchEntry kSearchIndex[] = {
     { "Scroll banks:",                                     kSecBindings, "" },
     { "Bank follows REAPER selection",                     kSecBindings, "" },
     { "Layer type",                                        kSecBindings, "" },
+    { "UAD Console",                                       kSecBindings, "" },
     { "MIDI CC",                                           kSecBindings, "" },
     { "Focus Set scope:",                                  kSecBindings, "" },
     { "UF1 Extender - 9th fader of the UF8 bank",          kSecBindings, "Focus Set scope", kDevUf8 },

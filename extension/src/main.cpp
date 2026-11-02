@@ -145,6 +145,7 @@
 #include "Protocol.h"
 #include "SetupBundle.h"
 #include "MidiCcLayer.h"
+#include "UadClient.h"   // the UAD Console layer (docs/uad-console-plan.md)
 #include "input_level_jsfx.h"  // generated: uf8::setup_bundle::kInputLevelJsfx{Bytes,Size}
 #include "inserts_overlay_lua.h"  // generated: uf8::setup_bundle::kInsertsOverlayLua{Bytes,Size}
 #include "assignment_hud_lua.h"   // generated: uf8::setup_bundle::kAssignmentHudLua{Bytes,Size}
@@ -672,6 +673,11 @@ inline bool uf8CcOwnsUnit_(int unit)
 {
     return uf8::bindings::ccLayerActive() && (unit == 0 || g_ccRightPage.load() >= 0);
 }
+// The UAD Console layer (docs/uad-console-plan.md): model, surface and the socket
+// to the UA Mixer Engine in one object, for the USB thread (fromUf8) and the timer
+// (tick, uadTick_). Its thread runs only while some layer is a UAD Console layer.
+// v1 drives the left UF8 only; a right one stays dark.
+uadside::Side g_uadSide;
 std::unique_ptr<uf8::ColorSync>   g_sync;
 std::unique_ptr<uf8::MidiBridge>  g_midi;
 
@@ -26254,8 +26260,8 @@ void pushSelectedStripBitmask()
 void sendLed(LedClass cls, MediaTrack* tr, bool on)
 {
     if (!g_dev) return;
-    // The MIDI CC layer paints Solo / Cut / Sel itself (ccPaintSurface_).
-    if (uf8::bindings::ccLayerActive()) return;
+    // The MIDI CC and UAD Console layers paint Solo / Cut / Sel themselves.
+    if (uf8::bindings::ccLayerActive() || uf8::bindings::uadLayerActive()) return;
     if (cls == LedClass::Arm) return;   // gate ARM until its colour-pair is captured
     // FX Learn UF8: in user-strip mode, Solo / Cut / Sel LEDs are driven
     // by the per-tick poll in pushZonesForVisibleSlots from user-binding
@@ -27152,6 +27158,7 @@ void closeUf8SecondUnit_()
 
 void shutdownDevices_()
 {
+    g_uadSide.enable(false);   // the engine socket; uadTick_ opens it again after a re-init
     g_sync.reset();
     if (g_midi) g_midi->close();
     g_midi.reset();
@@ -27502,6 +27509,28 @@ static void onUf8InputUnit_(const uint8_t* dataIn, size_t lenIn, int unit)
         size_t         i         = 0;   // the body below still steps it per frame
         const uint8_t  cmd       = data[1];
         const size_t   frameSize = fr.n;
+
+        // ⇨ UAD CONSOLE LAYER (docs/uad-console-plan.md): the left UF8 is the
+        // Console's mixer. UadSide takes every frame it knows and hands back the
+        // frames for the UF8 (limp, echo); LAYER 1..3 and 360 come back false and
+        // take the normal path below. A frame that wakes a dark surface does
+        // nothing else, as everywhere: the swallow window is 250 ms, so a press
+        // swallowed here leaves no latch behind (Bindings.cpp, wakeSwallow_).
+        if (unit == 0 && uf8::bindings::uadLayerActive()) {
+            bool woke = false;
+            if (cmd == 0x22 && frameSize >= 7)      woke = surfaceWake_(data[5] == 0x01) && data[5] == 0x01;
+            else if (cmd == 0x24)                   woke = surfaceWake_(true);
+            else if (cmd == 0x20 && frameSize >= 5) (void)surfaceWake_(data[4] != 0);
+            if (woke) continue;
+            std::vector<std::vector<uint8_t>> uadOut;
+            if (g_uadSide.fromUf8(fr, nowMs_(), uadOut)) {
+                for (auto& f : uadOut) {
+                    if (f.size() > 1 && f[1] == 0x1D) uf8SendPriS_(0, std::move(f));   // motor limp first
+                    else                              uf8SendS_(0, std::move(f));
+                }
+                continue;
+            }
+        }
 
         // Dispatch by command.
         if (cmd == 0x21 && data[i + 2] == 0x03) {
@@ -29083,6 +29112,11 @@ void onUf8Input2(const uint8_t* data, size_t len)
     // On a MIDI CC layer past the last page the right unit is dark and does
     // nothing: its faders and pots would otherwise ride tracks 9-16 unseen.
     if (uf8::bindings::ccLayerActive() && !uf8CcOwnsUnit_(1)) {
+        g_uf8FrameAsm[1].residual.clear();
+        return;
+    }
+    // A UAD Console layer drives the left UF8 only (v1): the right one is dark.
+    if (uf8::bindings::uadLayerActive()) {
         g_uf8FrameAsm[1].residual.clear();
         return;
     }
@@ -41189,6 +41223,63 @@ static void ccPaintSurface_()
     g_vpotBarInit = true;
 }
 
+// ---- UAD Console layer: tick and painter (docs/uad-console-plan.md, Baustein E) ----
+static int g_uadIdx = -1;   // the UAD layer the UF8 is on, -1 none (main thread)
+
+// The colour bar on the UAD layer: by channel type (UadSurface::stripRgb).
+uint32_t uadColorForStrip_(int slot)
+{
+    return (slot >= 0 && slot < 8) ? g_uadSide.stripRgb(slot) : 0;
+}
+
+// Once per tick, beside ccTick_: the engine connection while any layer is a UAD
+// layer, the model kept current while another layer is shown, and the surface
+// handed over on entering and leaving.
+static void uadTick_()
+{
+    const bool any = uf8::bindings::anyUadLayer();
+    g_uadSide.enable(any);
+    const int idx = uf8::bindings::uadLayerActiveIndex();
+    if (idx != g_uadIdx) {
+        const bool entered = idx >= 0 && g_uadIdx < 0;
+        const bool left    = g_uadIdx >= 0 && idx < 0;
+        g_uadIdx = idx;
+        invalidateGlobalLedCache_();
+        if (entered) {
+            g_uadSide.invalidate();
+            if (uf8Units_() > 1) uf8BlankUnit_(1);
+        }
+        if (left) {
+            // The layer painted the surface itself, outside the normal painters'
+            // caches: every one of them says "unknown" now, so they resend all of
+            // it, and the lower scribble row, which only the layer writes, is
+            // cleared.
+            uf8ResetStripState_(0, kUf8MaxStrips);
+            for (int s = 0; s < 8; ++s) uf8SendS_(s, uf8::buildStripTextLower(uf8Local_(s), "       "));
+            g_bankDirty.store(true);
+            g_pageDirty.store(true);
+            g_softKeyDirty.store(true);
+            if (g_sync) g_sync->invalidate();
+        }
+    }
+    if (idx < 0 && any) {
+        std::vector<std::vector<uint8_t>> none;
+        g_uadSide.tick(nowMs_(), false, none);
+    }
+}
+
+// Runs INSTEAD of pushZonesForVisibleSlots while the UF8 is on a UAD layer.
+static void uadPaintSurface_()
+{
+    if (!g_dev || !g_dev->isOpen()) return;
+    std::vector<std::vector<uint8_t>> frames;
+    g_uadSide.tick(nowMs_(), true, frames);
+    for (auto& f : frames) uf8SendS_(0, std::move(f));
+}
+
+// For Settings: the layer's connection and what it found.
+uadside::Status reasixty_uadStatus() { return g_uadSide.status(); }
+
 void pushZonesForVisibleSlots()
 {
     if (!g_dev || !g_dev->isOpen()) return;
@@ -45000,6 +45091,8 @@ void pushVuMeter()
     // fall back to its own Track_GetPeakInfo call (no double-read to avoid).
     g_focusPeakTrack = nullptr;
     if (!g_dev || !g_dev->isOpen()) return;
+    // The UAD Console layer meters the Console's channels itself (UadSurface).
+    if (uf8::bindings::uadLayerActive()) return;
 
     // UF8 Plugin Mode: scribble strips host FX-Learn-mapped plug-in
     // params, not REAPER tracks — the per-strip Peak-Meter LEDs would
@@ -45833,6 +45926,15 @@ void pushLayerLeds(int active)
 void pushUf8GlobalLeds()
 {
     if (!g_dev || !g_dev->isOpen()) return;
+
+    // UAD Console layer: UadSurface paints every global lamp except the layer keys
+    // and 360, which stay Rea-Sixty's (they are the way back to REAPER).
+    if (uf8::bindings::uadLayerActive()) {
+        pushLayerLeds(uf8::bindings::getQuickLayer());
+        sendUf8GlobalLed(uf8::Uf8GlobalLed::Btn360,
+                         boundActionIsActive_(buttonIdForGlobalLed(uf8::Uf8GlobalLed::Btn360)));
+        return;
+    }
 
     // Automation mode of the focused/selected track. REAPER values:
     //   0 = Trim/Read, 1 = Read, 2 = Touch, 3 = Write, 4 = Latch,
@@ -50024,6 +50126,7 @@ void onTimerBody_()
     // rea_sixty.log with the surface state around it, and the next occurrence
     // finally names what throws instead of leaving another empty report.
     ccTick_();
+    uadTick_();
     try {
         drainInputQueue();
     } catch (const std::exception& e) {
@@ -50171,14 +50274,17 @@ void onTimerBody_()
             g_sync->refresh(uf8EncPickerColorForStrip_, reaperColorForVisibleSlot);
         } else if (g_ccIdx >= 0) {
             g_sync->refresh(ccColorForStrip_);   // 8..15: the right UF8's page, 0 past the last
+        } else if (g_uadIdx >= 0) {
+            g_sync->refresh(uadColorForStrip_);  // by channel type; the right UF8 is dark
         } else if (overlayOnUf8) {
             g_sync->refresh(navColorForStrip, reaperColorForVisibleSlot);
         } else {
             g_sync->refresh(reaperColorForVisibleSlot);
         }
     }
-    if (g_ccIdx >= 0) ccPaintSurface_();
-    else              pushZonesForVisibleSlots();
+    if (g_ccIdx >= 0)       ccPaintSurface_();
+    else if (g_uadIdx >= 0) uadPaintSurface_();
+    else                    pushZonesForVisibleSlots();
     persistDynaState_();
     tickHueTransport_();
     // Phase 2.8 Nav Mode — decorate three zones (slot label, channel
@@ -50572,6 +50678,7 @@ void onTimerBody_()
             MediaTrack* tr = uf8StripMeterTrack_(st, bankOffset, grTrackCount);
             // The right UF8 is dark on a MIDI CC layer (uf8BlankUnit_).
             if (st >= 8 && uf8::bindings::ccLayerActive()) tr = nullptr;
+            if (uf8::bindings::uadLayerActive()) tr = nullptr;   // no GR on the Console layer
             // Blank strip (past the end of the list, or a mount / lamp strip,
             // or a route to a hardware output / an empty slot): both rows
             // dark, holders cleared so nothing ramps down later.

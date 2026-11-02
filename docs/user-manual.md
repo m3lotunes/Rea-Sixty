@@ -3507,6 +3507,52 @@ FINE, the channel encoder with NAV, NUDGE and FOCUS, the zoom pad, the automatio
 
 \newpage
 
+## UAD Console layer (UF8)
+
+Any of the UF8's three layers can be a **UAD Console** layer. On it the UF8 is a mixer for UAD Console, the mixer of Universal Audio's Apollo interfaces: the faders ride the Console's channels, the scribbles show their names, the meters their levels, and the keys reach mute, solo, sends, the preamps and the monitor section. No extra app and no MIDI: Rea-Sixty talks to UAD Console's own mixer engine on the same computer.
+
+It works with any interface UAD Console shows, and with several cascaded ones: the channels come from the Console, not from a list in Rea-Sixty.
+
+### Setting it up
+
+1. UAD Console runs on this computer. Its window may be closed; the mixer engine keeps running in the background.
+2. In *Settings → Bindings → UF8*, go to the layer and set **Layer type** to *UAD Console*.
+3. The block below shows the connection: the interface's name, *online*, and how many channels the UF8 will show. *UAD Console not found* means the Console is not running.
+
+While the interface is **offline** (unplugged, switched off), the UF8 shows *offline* and writes nothing: UAD Console keeps the last settings of an interface that is gone, and those are not worth changing.
+
+### What the controls do
+
+| Control | Function |
+|---|---|
+| Faders | The Console's channels in Console order, eight per bank. A stereo pair is one fader, named with its stereo name. The AUX returns come after the inputs. A channel switched off or hidden in the Console is left out. The fader stands where the Console fader stands. |
+| BANK ◄ ► | The previous / next eight channels. |
+| SOLO / CUT | Solo / mute the channel. An AUX has mute only. |
+| SEL | Picks the channel for the preamp keys. |
+| Soft-key bank V-POT | **PAN**, **SEND**, **INPUTS**: what the V-Pots do. |
+| V-Pots, PAN | Pan. Push: centre. |
+| V-Pots, SEND | The send picked with SEND/PLUG-IN 1-6: AUX 1, AUX 2, CUE 1-4. Push: send on / off. |
+| V-Pots, INPUTS | Preamp gain in whole dB, on channels that have a preamp. |
+| Soft-key bank 1 | Monitor: **ALT**, **DIM**, **MONO**, **MUTE**. |
+| Soft-key bank 2 | The preamp of the selected channel: **48V** (hold for half a second), **PAD**, **PHASE**, **LOW CUT**, **HI-Z**. |
+| CHANNEL encoder | Monitor level, one step per detent, never above the Console's maximum. FINE: half steps. Push: monitor mute. |
+| FINE | Finer pan and send steps while held. |
+| LAYER 1-3, 360 | As on every layer: LAYER 1 is back to REAPER at once. |
+
+The scribbles show the name on top and what the V-Pot controls below, the fader readout the channel's level in dB, the colour bar the kind of channel (mic, line, ADAT, virtual, AUX). The meters show the left and right level of each channel; a clip lights the top segment.
+
+A second UF8 stays dark on this layer.
+
+### Good to know
+
+- **48V needs a hold** on purpose: phantom power can damage ribbon microphones.
+- **Headphone level** is the knob on the interface. UAD Console does not offer it to other programs; the headphone *source* (cue mix) it does.
+- **Only this computer.** UAD Console's mixer engine also answers other computers on the network, without a password. Rea-Sixty connects to this computer only (127.0.0.1).
+- Do not enable anything in REAPER's MIDI preferences for this layer; it uses no MIDI.
+- Switching back to REAPER repaints the whole UF8. Switching to the UAD layer shows the Console's state at once: Rea-Sixty keeps it current in the background while any layer is a UAD Console layer.
+
+\newpage
+
 # Operational modes (track filters)
 
 ## Folder Mode

@@ -1,4 +1,5 @@
-// SettingsScreen_MidiCc.cpp: the MIDI CC layer in Settings > Bindings > UF8
+// SettingsScreen_MidiCc.cpp: the MIDI CC layer (and the UAD Console layer's block)
+// in Settings > Bindings > UF8
 // (docs/midi-cc-layer-plan.md, Baustein I, as in Frank's approved mockup of
 // 27.10.2026): the layer type, the layer block (outputs, input, follow, default
 // channel, presets), the five pages, the grid of controls and the editor of the
@@ -17,10 +18,12 @@
 
 #include "Bindings.h"
 #include "MidiCcLayer.h"
+#include "UadClient.h"
 #include "reaper_imgui_functions.h"
 #include "reaper_plugin_functions.h"
 
 int reasixty_ccInputStatus();   // main.cpp: 0 none, 1 open, 2 not found, 3 busy
+uadside::Status reasixty_uadStatus();   // main.cpp: the UAD Console layer's connection
 
 namespace {
 
@@ -396,18 +399,25 @@ bool drawUf8LayerKindRow(ImGui_Context* ctx, int layer)
     ImGui_Text(ctx, "   Layer type");
     ImGui_SameLine(ctx, nullptr, nullptr);
     ImGui_SetNextItemWidth(ctx, 140.0);
-    const bool cc = bnd::layerKind(layer) == bnd::LayerKind::MidiCc;
-    if (ImGui_BeginCombo(ctx, "##uf8_layer_kind", cc ? "MIDI CC" : "REAPER", nullptr)) {
-        bool sR = !cc, sC = cc;
+    const bnd::LayerKind kind = bnd::layerKind(layer);
+    const char* kindName = kind == bnd::LayerKind::MidiCc ? "MIDI CC"
+                         : kind == bnd::LayerKind::Uad    ? "UAD Console"
+                                                          : "REAPER";
+    if (ImGui_BeginCombo(ctx, "##uf8_layer_kind", kindName, nullptr)) {
+        bool sR = kind == bnd::LayerKind::Reaper, sC = kind == bnd::LayerKind::MidiCc,
+             sU = kind == bnd::LayerKind::Uad;
         if (ImGui_Selectable(ctx, "REAPER##lk_reaper", &sR, nullptr, nullptr, nullptr))
             bnd::setLayerKind(layer, bnd::LayerKind::Reaper);
         if (ImGui_Selectable(ctx, "MIDI CC##lk_cc", &sC, nullptr, nullptr, nullptr))
             bnd::setLayerKind(layer, bnd::LayerKind::MidiCc);
+        if (ImGui_Selectable(ctx, "UAD Console##lk_uad", &sU, nullptr, nullptr, nullptr))
+            bnd::setLayerKind(layer, bnd::LayerKind::Uad);
         ImGui_EndCombo(ctx);
     }
-    tip_(ctx, "MIDI CC: faders, V-Pots and keys send MIDI on this layer.");
-    if (!cc) return false;
-    // On a CC layer the schematic is not drawn, so the layer keys are here.
+    tip_(ctx, "MIDI CC: faders, V-Pots and keys send MIDI on this layer.\n"
+              "UAD Console: the UF8 is a mixer for UAD Console (Universal Audio).");
+    if (bnd::layerKind(layer) == bnd::LayerKind::Reaper) return false;
+    // On a CC or UAD layer the schematic is not drawn, so the layer keys are here.
     for (int l = 0; l < 3; ++l) {
         ImGui_SameLine(ctx, nullptr, nullptr);
         char id[32];
@@ -419,7 +429,46 @@ bool drawUf8LayerKindRow(ImGui_Context* ctx, int layer)
             bnd::dispatch(b, /*pressed*/ false);
         }
     }
-    return bnd::layerKind(layer) == bnd::LayerKind::MidiCc;
+    return bnd::layerKind(layer) != bnd::LayerKind::Reaper;
+}
+
+// The UAD Console layer's block, in place of the schematic (docs/uad-console-plan.md).
+// Read only in this version: the connection, and what each control does. The
+// Console-like editor comes later (plan, Baustein G).
+void drawUf8UadLayer(ImGui_Context* ctx, int layer)
+{
+    (void)layer;
+    const uadside::Status st = reasixty_uadStatus();
+    ImGui_Spacing(ctx);
+    char line[160];
+    if (!st.running)
+        snprintf(line, sizeof(line), "Connection: starting...");
+    else if (!st.connected)
+        snprintf(line, sizeof(line), "Connection: UAD Console not found (is it running on this computer?)");
+    else
+        snprintf(line, sizeof(line), "Connection: UAD Console, %s, %s, %d channels",
+                 st.device.empty() ? "no interface" : st.device.c_str(),
+                 st.online ? "online" : "OFFLINE", st.channels);
+    ImGui_Text(ctx, line);
+    tip_(ctx, "Rea-Sixty talks to UAD Console's mixer engine on this computer (127.0.0.1:4710).\n"
+              "Nothing is written while the interface is offline.");
+    ImGui_Spacing(ctx);
+    ImGui_Separator(ctx);
+    ImGui_Spacing(ctx);
+    ImGui_Text(ctx, "On this layer");
+    static const char* const kRows[] = {
+        "Faders               Console channel levels, 8 per bank, in Console order (stereo pairs once, then AUX)",
+        "BANK < >             next / previous 8 channels",
+        "SOLO / CUT / SEL     Solo / Mute / select the channel (for the preamp keys)",
+        "V-Pots               PAN, SEND or INPUTS (preamp gain), picked on the V-POT soft-key bank",
+        "V-Pot push           PAN: centre; SEND: send on/off",
+        "SEND/PLUG-IN 1-6     which send: AUX 1, AUX 2, CUE 1-4",
+        "Soft-key bank 1      monitor: ALT, DIM, MONO, MUTE",
+        "Soft-key bank 2      preamp of the selected channel: 48V (hold), PAD, PHASE, LOW CUT, HI-Z",
+        "CHANNEL encoder      monitor level (FINE: half steps); push: monitor mute",
+        "LAYER 1-3, 360       as on every layer",
+    };
+    for (const char* r : kRows) ImGui_TextDisabled(ctx, r);
 }
 
 // The CC layer's editor, in place of the schematic.

@@ -460,6 +460,7 @@ int  reasixty_ccLivePage();          // MIDI CC layer: the page the UF8 is on
 // SettingsScreen_MidiCc.cpp
 bool drawUf8LayerKindRow(ImGui_Context* ctx, int layer);
 void drawUf8MidiCcLayer(ImGui_Context* ctx, int layer, int livePage);
+void drawUf8UadLayer(ImGui_Context* ctx, int layer);
 int  reasixty_visibilityFollow();
 void reasixty_setVisibilityFollow(int v);
 bool reasixty_pinnedSurvivesBanking();
@@ -7733,7 +7734,10 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
             // The layer's type first. A MIDI CC layer replaces the schematic
             // with its own editor (SettingsScreen_MidiCc.cpp).
             if (drawUf8LayerKindRow(ctx, s_editLayer)) {
-                drawUf8MidiCcLayer(ctx, s_editLayer, reasixty_ccLivePage());
+                if (uf8::bindings::layerKind(s_editLayer) == uf8::bindings::LayerKind::Uad)
+                    drawUf8UadLayer(ctx, s_editLayer);
+                else
+                    drawUf8MidiCcLayer(ctx, s_editLayer, reasixty_ccLivePage());
             } else {
             drawUf8Vector(ctx, s_selected, s_editQuick, s_editSubBank);
             // Bank-scroll stride: when a selection scrolls past the surface
@@ -7818,9 +7822,10 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
     const bool selIsUf1 =
         s_selected >= ButtonId::Uf1VpotAbovePush
      && s_selected <= ButtonId::Uf1Jog;
-    // A MIDI CC layer has its own editor above; the key editor stays away.
+    // A MIDI CC or UAD Console layer has its own block above; the key editor
+    // stays away.
     const bool ccEditUf8 = s_deviceTab == 0
-        && uf8::bindings::layerKind(s_editLayer) == uf8::bindings::LayerKind::MidiCc;
+        && uf8::bindings::layerKind(s_editLayer) != uf8::bindings::LayerKind::Reaper;
     const ButtonId editSel =
         (s_deviceTab == 2) ? (selIsUf1 ? s_selected : ButtonId::None) : // UF1 tab: UF1 only
         (s_deviceTab == 1) ? (selIsUc1 ? s_selected : ButtonId::None) : // UC1 tab: UC1 only
