@@ -21,6 +21,44 @@ Für den Branch `uad-console` im Fork `m3lotunes/Rea-Sixty`, macOS Apple Silicon
    **Artifacts** auf **reaper_rea-sixty.dylib** klicken. Das lädt ein ZIP; im Finder doppelklicken.
    Darin liegt `reaper_rea-sixty.dylib`.
 
+## 1b. Oder selbst auf dem Mac bauen
+
+Schneller, wenn GitHub auf einen Mac-Runner wartet. Jede Zeile einzeln im Terminal:
+
+1. Werkzeuge prüfen. `xcode-select -p` muss einen Pfad zeigen, sonst `xcode-select --install`.
+   `brew --version` muss eine Version zeigen, sonst Homebrew von https://brew.sh installieren.
+2. Abhängigkeiten:
+
+   ```bash
+   brew install libusb hidapi pkg-config cmake
+   ```
+
+3. Code holen (neuer Ordner, stört nichts anderes):
+
+   ```bash
+   git clone -b uad-console https://github.com/m3lotunes/Rea-Sixty.git ~/ReaSixty-Build
+   ```
+
+   Später auf den neuesten Stand: `git -C ~/ReaSixty-Build pull`.
+4. Bauen, nur die Erweiterung (ohne Tests und Werkzeuge). Beim ersten Mal lädt CMake das
+   REAPER-SDK und WDL von GitHub; `main.cpp` braucht ein paar Minuten:
+
+   ```bash
+   cd ~/ReaSixty-Build/extension
+   ```
+
+   ```bash
+   cmake -B build -DCMAKE_BUILD_TYPE=Release
+   ```
+
+   ```bash
+   cmake --build build --target reaper_uf8 -j
+   ```
+
+5. Ergebnis: `~/ReaSixty-Build/extension/build/reaper_rea-sixty.dylib`, schon ad-hoc signiert.
+   Weiter mit Abschnitt 2; beim Kopieren diesen Pfad statt `~/Downloads` nehmen. `xattr` ist bei
+   einem selbst gebauten Build nicht nötig.
+
 ## 2. Installieren
 
 1. **REAPER beenden.**
