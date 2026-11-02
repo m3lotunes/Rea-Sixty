@@ -41277,9 +41277,6 @@ static void uadPaintSurface_()
     for (auto& f : frames) uf8SendS_(0, std::move(f));
 }
 
-// For Settings: the layer's connection and what it found.
-uadside::Status reasixty_uadStatus() { return g_uadSide.status(); }
-
 void pushZonesForVisibleSlots()
 {
     if (!g_dev || !g_dev->isOpen()) return;
@@ -55928,6 +55925,12 @@ void reasixty_setBankFollowsSelection(bool on)
             followSelectedInMixer(tr, /*scrollTcp=*/false, /*moveBank=*/true);
 }
 int  reasixty_ccLivePage()            { return g_ccState.page; }
+// For Settings: the UAD Console layer's connection and what it found. Here, with
+// the other functions Settings reaches, and NOT up beside uadPaintSurface_: that
+// part of the file sits in an anonymous namespace, and the function was neither
+// visible to SettingsScreen_MidiCc.cpp nor reported as missing by the Linux link
+// (MSVC caught it, 2026-11-02).
+uadside::Status reasixty_uadStatus() { return g_uadSide.status(); }
 int  reasixty_ccInputStatus()         { return g_ccInStatus; }
 bool reasixty_bankScrollByOne()       { return g_bankScrollByOne.load(); }
 void reasixty_setBankScrollByOne(bool on)
