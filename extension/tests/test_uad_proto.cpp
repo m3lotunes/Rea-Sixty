@@ -16,8 +16,19 @@ int main()
         const std::string g = uad::get("/devices");
         EXPECT(g.size() == 13 && g.back() == '\0' && g.substr(0, 12) == "get /devices");
         EXPECT(uad::subscribe("/devices/0/DeviceOnline") == std::string("subscribe /devices/0/DeviceOnline", 33) + '\0');
-        const std::string s = uad::set("/devices/0/inputs/1/FaderLevelTapered/value/", "0.5");
-        EXPECT(s == std::string("set /devices/0/inputs/1/FaderLevelTapered/value/ 0.5") + '\0');
+        // set always targets the /value leaf, canonical form, no trailing slash
+        const std::string z = std::string(1, '\0');
+        EXPECT(uad::set("/devices/0/inputs/1/FaderLevelTapered/value/", "0.5")
+               == "set /devices/0/inputs/1/FaderLevelTapered/value 0.5" + z);
+        EXPECT(uad::set("/devices/0/inputs/1/FaderLevelTapered", "0.5")
+               == "set /devices/0/inputs/1/FaderLevelTapered/value 0.5" + z);
+        EXPECT(uad::setNumber("/devices/0/inputs/0/FaderLevel", -6.5)
+               == "set /devices/0/inputs/0/FaderLevel/value -6.5" + z);
+        EXPECT(uad::setNumber("/x", 0.7818182) == "set /x/value 0.781818" + z);
+        EXPECT(uad::setBool("/devices/0/inputs/0/Mute", true) == "set /devices/0/inputs/0/Mute/value true" + z);
+        EXPECT(uad::setString("/devices/0/inputs/0/Name", "UG 1") == "set /devices/0/inputs/0/Name/value \"UG 1\"" + z);
+        EXPECT(uad::jsonQuote("a\"b\\c\n") == "\"a\\\"b\\\\c\\n\"");
+        EXPECT(uad::jsonQuote(std::string("x\x01", 2)) == "\"x\\u0001\"");
         EXPECT(uad::child("/devices", "0") == "/devices/0");
         EXPECT(uad::child("/devices/0/", "inputs") == "/devices/0/inputs");
         EXPECT(uad::child("", "x") == "/x");

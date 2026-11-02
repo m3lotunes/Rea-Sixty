@@ -17,10 +17,12 @@
 //            --sub /devices/0/inputs/0/FaderLevelTapered
 //            --sub /devices/0/inputs/0/meters/0/MeterLevel
 //
-// Build on the Mac (from the repository root, one line):
-//   clang++ -std=c++20 -O1 -Iextension/src -Iextension/vendor/WDL extension/tools/uad_engine_probe.cpp
-//           -o uad_engine_probe
-// Builds the same on Linux (POSIX sockets); the CMake target is uad_engine_probe.
+// Build: the CMake target uad_engine_probe (it fetches WDL into extension/vendor).
+// Without CMake, from the repository root, with WDL cloned into
+// extension/vendor/WDL first (one line):
+//   clang++ -std=c++20 -O1 -Iextension/src -isystem extension/vendor/WDL
+//           extension/tools/uad_engine_probe.cpp -o uad_engine_probe
+// POSIX sockets: macOS and Linux.
 
 #include "UadProto.h"
 

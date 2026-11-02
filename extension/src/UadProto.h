@@ -20,6 +20,7 @@
 //
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -79,16 +80,64 @@ inline std::string command(std::string_view method, std::string_view path)
 inline std::string get(std::string_view path)       { return command("get", path); }
 inline std::string subscribe(std::string_view path) { return command("subscribe", path); }
 
-// "set <path> <value>". Values as UA Midi Control writes them: numbers plain,
-// booleans true/false. The caller decides the path, including any trailing
-// "/value" the property needs.
-inline std::string set(std::string_view path, std::string_view value)
+// "set <path> <value>", the value as JSON text: numbers bare, true/false, strings
+// quoted (setString). A set always targets the property's "/value" leaf (the
+// engine's own canonical form, without UA Midi Control's trailing slash); the
+// caller passes the property path and setValuePath adds the leaf.
+//
+// ⛔ THE ENGINE DOES NOT ENFORCE ITS OWN "readonly" FLAGS: a write to DeviceHwID
+// was applied on real hardware (uad-console-mcp, docs/PROTOCOL.md). Whatever
+// sends sets keeps its own allowlist of properties; this file only spells them.
+inline std::string setValuePath(std::string_view property)
+{
+    std::string p(property);
+    while (!p.empty() && p.back() == '/') p.pop_back();
+    const std::string_view leaf = "/value";
+    if (p.size() < leaf.size() || p.compare(p.size() - leaf.size(), leaf.size(), leaf) != 0)
+        p.append(leaf);
+    return p;
+}
+
+inline std::string set(std::string_view property, std::string_view jsonValue)
 {
     std::string s = "set ";
-    s.append(path).append(" ").append(value);
+    s.append(setValuePath(property)).append(" ").append(jsonValue);
     s.push_back('\0');
     return s;
 }
+
+inline std::string jsonQuote(std::string_view text)
+{
+    std::string q = "\"";
+    for (const char c : text) {
+        switch (c) {
+            case '"':  q += "\\\""; break;
+            case '\\': q += "\\\\"; break;
+            case '\n': q += "\\n"; break;
+            case '\r': q += "\\r"; break;
+            case '\t': q += "\\t"; break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char b[8];
+                    std::snprintf(b, sizeof(b), "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
+                    q += b;
+                } else {
+                    q.push_back(c);
+                }
+        }
+    }
+    q.push_back('"');
+    return q;
+}
+
+inline std::string setNumber(std::string_view property, double v)
+{
+    char b[32];
+    std::snprintf(b, sizeof(b), "%.6g", v);
+    return set(property, b);
+}
+inline std::string setBool(std::string_view property, bool v) { return set(property, v ? "true" : "false"); }
+inline std::string setString(std::string_view property, std::string_view v) { return set(property, jsonQuote(v)); }
 
 // Joins a parent path and a child key: "/devices" + "0" = "/devices/0".
 inline std::string child(std::string_view parent, std::string_view key)
@@ -101,7 +150,9 @@ inline std::string child(std::string_view parent, std::string_view key)
 
 // The path a reply is about, without parsing the whole JSON: the first "path"
 // string. Enough to route replies and subscription updates; a full parse (WDL's
-// jsonparse with JsonTreeGuard) reads the data.
+// jsonparse with JsonTreeGuard) reads the data. A batched push (only after
+// "subscribe mode=multi", which we do not send) reads "multi" and carries a list
+// of {path, data} to flatten first.
 inline std::string replyPath(std::string_view json)
 {
     const std::string_view key = "\"path\"";
