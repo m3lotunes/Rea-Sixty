@@ -926,6 +926,12 @@ if(NOT WIN32)
     target_include_directories(test_midi_cc_bindings PRIVATE src "${WDL_DIR}")
     target_link_libraries(test_midi_cc_bindings PRIVATE Threads::Threads)
     add_test(NAME midi_cc_bindings COMMAND test_midi_cc_bindings)
+    # The UAD Console layer in bindings.json: kind, uadLayerActive, anyUadLayer.
+    add_executable(test_uad_bindings tests/test_uad_bindings.cpp
+        src/Bindings.cpp src/KeyMacro.cpp src/LogPath.cpp)
+    target_include_directories(test_uad_bindings PRIVATE src "${WDL_DIR}")
+    target_link_libraries(test_uad_bindings PRIVATE Threads::Threads)
+    add_test(NAME uad_bindings COMMAND test_uad_bindings)
     # Shift + Layer 2 / 3 = the Hue / DynaMount UF8 side-car (factory, v56 upgrade).
     add_executable(test_sidecar_keys tests/test_sidecar_keys.cpp
         src/Bindings.cpp src/KeyMacro.cpp src/LogPath.cpp)

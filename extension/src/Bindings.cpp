@@ -2141,6 +2141,8 @@ void serializeLayerBody_(const Layer& L, std::ostringstream& os,
     os << ",\n";
     if (L.kind == LayerKind::MidiCc)
         os << fieldPad << "\"kind\": \"midi_cc\",\n";
+    if (L.kind == LayerKind::Uad)
+        os << fieldPad << "\"kind\": \"uad\",\n";
     if (L.kind == LayerKind::MidiCc || L.ccUsed) {
         os << fieldPad << "\"midi_cc\": ";
         serializeCcLayer_(L.cc, os, fieldPad);
@@ -3214,7 +3216,9 @@ bool parseLayer_(wdl_json_element* lobj, Layer& out)
         if (auto* s = v->get_string_value()) out.vpotDefaultMode = s;
     if (auto* v = lobj->get_item_by_name("kind"))
         if (auto* s = v->get_string_value())
-            out.kind = std::strcmp(s, "midi_cc") == 0 ? LayerKind::MidiCc : LayerKind::Reaper;
+            out.kind = std::strcmp(s, "midi_cc") == 0 ? LayerKind::MidiCc
+                     : std::strcmp(s, "uad") == 0     ? LayerKind::Uad
+                                                      : LayerKind::Reaper;
     if (auto* v = lobj->get_item_by_name("midi_cc"); v && v->is_object()) {
         out.ccUsed = true;
         parseCcLayer_(v, out.cc);
@@ -6488,6 +6492,9 @@ void tickLongPressThreshold()
 std::atomic<bool> g_layersQuicksOnly{false};
 // The CC layer the surface is on, -1 none (ccLayerActive below).
 std::atomic<int>  g_ccActiveLayer{-1};
+// The UAD Console layer the surface is on, -1 none; and whether any layer is one.
+std::atomic<int>  g_uadActiveLayer{-1};
+std::atomic<bool> g_anyUadLayer{false};
 
 // ⇨ THE KEYS THAT ARE THE LAYER MECHANISM ITSELF. Under "Layers switch Quicks
 // only" every other button keeps Layer 1's binding, but these must follow the
@@ -6505,7 +6512,10 @@ int applyLayerOption(int rawLayer, ButtonId id)
     // its mode keys, the zoom pad, the automation row, FLIP, the layer keys, 360;
     // docs/midi-cc-layer-plan.md section 4). They resolve on Layer 1. The CC
     // layer's own keys never get here: onUf8Input takes them first.
-    if (rawLayer >= 0 && rawLayer == g_ccActiveLayer.load()) return 0;
+    // A UAD Console layer passes on only the layer keys and 360; they resolve on
+    // Layer 1 the same way.
+    if (rawLayer >= 0 && (rawLayer == g_ccActiveLayer.load() || rawLayer == g_uadActiveLayer.load()))
+        return 0;
     if (!g_layersQuicksOnly.load()) return rawLayer;
     return isLayerSelectorButton(id) ? rawLayer : 0;
 }
@@ -10068,6 +10078,12 @@ void refreshCcActiveLocked_()
 {
     const int l = g_cfg.activeLayer;
     g_ccActiveLayer.store((l >= 0 && l < 3 && g_cfg.layers[l].kind == LayerKind::MidiCc) ? l : -1);
+    // The UAD Console layer rides the same refresh: every caller of this one
+    // (layer switch, kind change, load, main.cpp's tick) needs both.
+    g_uadActiveLayer.store((l >= 0 && l < 3 && g_cfg.layers[l].kind == LayerKind::Uad) ? l : -1);
+    bool any = false;
+    for (const auto& L : g_cfg.layers) any = any || L.kind == LayerKind::Uad;
+    g_anyUadLayer.store(any);
 }
 }
 
@@ -10108,6 +10124,9 @@ void setCcLayer(int layer, const midicc::Layer& cc)
 
 bool ccLayerActive()      { return g_ccActiveLayer.load() >= 0; }
 int  ccLayerActiveIndex() { return g_ccActiveLayer.load(); }
+bool uadLayerActive()      { return g_uadActiveLayer.load() >= 0; }
+int  uadLayerActiveIndex() { return g_uadActiveLayer.load(); }
+bool anyUadLayer()         { return g_anyUadLayer.load(); }
 
 void refreshCcLayerActive()
 {

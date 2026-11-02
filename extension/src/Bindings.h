@@ -848,9 +848,14 @@ struct LayerUserQuicks {
 };
 
 // What a layer drives. MidiCc: the UF8's faders, V-Pots, pushes, soft-keys,
-// SEND/PLUG-IN keys and feet send MIDI (docs/midi-cc-layer-plan.md); the
-// layer's bindings stay stored for the day it goes back to Reaper.
-enum class LayerKind : uint8_t { Reaper, MidiCc };
+// SEND/PLUG-IN keys and feet send MIDI (docs/midi-cc-layer-plan.md). Uad: the
+// UF8 is a mixer for UAD Console through the UA Mixer Engine
+// (docs/uad-console-plan.md). Either way the layer's bindings stay stored for the
+// day it goes back to Reaper.
+// ⛔ APPEND ONLY: bindings.json stores the kind by name ("midi_cc", "uad"), but
+// the value is compared everywhere; an older Rea-Sixty reads an unknown name as
+// Reaper (and writes it back as Reaper when it saves).
+enum class LayerKind : uint8_t { Reaper, MidiCc, Uad };
 
 struct Layer {
     std::string name;
@@ -1277,6 +1282,14 @@ void          setCcLayer(int layer, const midicc::Layer& cc);
 bool          ccLayerActive();
 int           ccLayerActiveIndex();                     // -1 = none
 void          refreshCcLayerActive();
+// ---- UAD Console layer (docs/uad-console-plan.md, Baustein E) ----
+// The same for a UAD Console layer: is the UF8 on one (the RAW layer, it takes the
+// whole surface), and is any layer one at all (then main.cpp keeps the
+// connection to the UA Mixer Engine open). Atomic, any thread; kept current by
+// refreshCcLayerActive and every layer switch / kind change.
+bool          uadLayerActive();
+int           uadLayerActiveIndex();                    // -1 = none
+bool          anyUadLayer();
 // Presets: save overwrites by name.
 std::vector<std::string> ccPresetNames();
 bool          saveCcPreset(const std::string& name, int layer);
