@@ -897,6 +897,11 @@ if(NOT WIN32)
     add_executable(test_midi_cc_layer tests/test_midi_cc_layer.cpp)
     target_include_directories(test_midi_cc_layer PRIVATE src)
     add_test(NAME midi_cc_layer COMMAND test_midi_cc_layer)
+    # UAD Console side-car: the UA Mixer Engine's text protocol (UadProto.h,
+    # docs/uad-console-plan.md).
+    add_executable(test_uad_proto tests/test_uad_proto.cpp)
+    target_include_directories(test_uad_proto PRIVATE src)
+    add_test(NAME uad_proto COMMAND test_uad_proto)
     # The MIDI CC layer in bindings.json: kind, CC set, presets, ccLayerActive.
     add_executable(test_midi_cc_bindings tests/test_midi_cc_bindings.cpp
         src/Bindings.cpp src/KeyMacro.cpp src/LogPath.cpp)
@@ -1169,6 +1174,11 @@ if(NOT WIN32)
     if(WIN32)
         target_link_libraries(rme_osc_probe PRIVATE ws2_32)
     endif()
+
+    # What the UA Mixer Engine (UAD Console) offers on this machine: walks its tree
+    # and logs it. Read only, never `set` (docs/uad-console-plan.md). POSIX.
+    add_executable(uad_engine_probe tools/uad_engine_probe.cpp)
+    target_include_directories(uad_engine_probe PRIVATE src "${WDL_DIR}")
 endif()
 
 # ----- ORC ---------------------------------------------------------------------
