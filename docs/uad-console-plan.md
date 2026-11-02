@@ -176,12 +176,12 @@ offen ist, steht in Abschnitt 6.
 
 | # | Frage | Vorschlag |
 |---|---|---|
-| 1 | **Wie hinein?** Side-Car mit Shift + LAYER n wie TotalMix, Hue und DynaMount, oder Layer-Typ „UAD Console“ (wie der CC-Layer: LAYER 3 = Apollo) | Layer-Typ, weil Layer 3 beim Nutzer schon „das Apollo“ ist. Der Kern ist von dieser Wahl unabhängig |
+| 1 | **Wie hinein?** Side-Car mit Shift + LAYER n wie TotalMix, Hue und DynaMount, oder Layer-Typ „UAD Console“ (wie der CC-Layer) | **Entschieden 02.11.: Layer-Typ** „UAD Console“ in Settings → Bindings → UF8 → Layer type |
 | 2 | MONITOR als eigener Fader hinter den Aux-Kanälen? | nein, Monitor über Encoder und Soft-Keys (und später die UF1) |
-| 3 | Belegung der V-POT-Bank | PAN, SEND, INPUTS (Preamp); 4–8 frei |
-| 4 | CHANNEL-Encoder = Monitor-Pegel? | ja; NAV schaltet auf Bank blättern |
+| 3 | Belegung der Soft-Keys | **Entschieden 02.11.: wie vorgeschlagen.** V-POT-Bank: PAN, SEND, INPUTS; Bank 1: ALT, DIM, MONO, MUTE; Bank 2: Preamp des gewählten Kanals |
+| 4 | CHANNEL-Encoder = Monitor-Pegel? | **Entschieden 02.11.: ja**, Druck = Monitor Mute |
 | 5 | Was die alten Labels GAIN und PLUGIN werden | GAIN entfällt (Preamp = INPUTS). PLUGIN später: Plug-ins des gewählten Kanals (Bypass), nur lesen und an/aus |
-| 6 | Mapping-Editor | Stufe 1 sofort: Apollo-Builtins (ALT, DIM, Talkback, 48V …) auf jede Taste, wie `RmeBuiltins`. Stufe 2: Kanalliste und Modi im Editor. Stufe 3: Lernen über Abo |
+| 6 | Mapping-Editor | Stufe 1: UAD-Builtins (ALT, DIM, Talkback, 48V …) auf jede Taste, wie `RmeBuiltins`. Stufe 2: **Patch-Ansicht** (Wunsch des Nutzers 02.11., Baustein G). Stufe 3: Lernen über Abo |
 
 ---
 
@@ -215,12 +215,35 @@ Socket und REAPER kommen zuletzt dazu.
 | A | `UadProto.h`, `uad_engine_probe`, Protokoll-Referenz | **gebaut 02.11.** |
 | B | `UadModel`: Baum und Updates lesen, Kanalliste, Monitor. Dazu eine virtuelle Engine (`UadSim.h`), gefüttert mit dem gemessenen Baum | **gebaut 02.11.**, `test_uad_model` |
 | C | `UadSurface`: UF8 ↔ Modell und Schreibbefehle, Erlaubt-Liste, Bündelung, Echo-Sperre. Getestet gegen virtuelle UF8 und virtuelle Engine. Das ist der Abnahmetest ohne Studio | **gebaut 02.11.**, `test_uad_surface` (11 Szenarien) |
-| D | `UadClient`: Socket-Thread, Wiederverbinden, Abos je Bank | |
-| E | Rea-Sixty-Anschluss: Eintritt (Entscheid 1), Settings, Apollo-Builtins, Handbuch | |
+| D | `UadClient` / `UadSide`: Socket-Thread, Wiederverbinden, Abos je Bank, Meter-Abos nur für die gezeigte Bank | **gebaut 02.11.**, `test_uad_client` (echter Socket) |
+| E | Rea-Sixty-Anschluss: `LayerKind::Uad` (gebaut 02.11., `test_uad_bindings`), `main.cpp` an den Stellen der CC-Karte, Settings-Block (Status und Übersicht, nur lesend), Handbuch | in Arbeit 02.11. |
 | F | UF1 als Monitor-Controller | |
-| G | Editor und Lernen (Entscheid 6) | |
+| G | **Patch-Ansicht** (Wunsch des Nutzers 02.11.), siehe unten; dazu Lernen | |
 | H | ORC (Apollo ohne REAPER) | |
 | I | Pull Request an acklin83/Rea-Sixty, **nur nach OK** | |
+
+### Baustein G: Patch-Ansicht (Idee des Nutzers, 02.11.)
+
+In Settings → Bindings → UF8, wenn der Layer „UAD Console“ ist:
+
+- **Oben** die UF8, als der vorhandene Schaltplan (`drawUf8Vector`).
+- **Unten** die UAD Console: je Kanal ein Kanalzug mit Name, Fader, Mute/Solo, Pan, Sends und
+  Preamp, live aus der Engine (`UadModel`), in Console-Reihenfolge, ausgeblendete Kanäle grau.
+- **Kabel** (Bezier-Kurven auf der ImGui-Zeichenfläche) von UF8-Element zu Console-Element:
+  - Die 8 Fader-Kabel zeigen die aktuelle Bank und wandern mit BANK.
+  - Tasten-Kabel zeigen Soft-Keys und SEND/PLUG-IN.
+- **Patchen:**
+  - Ein Kabel von einem UF8-Element auf ein Console-Element ziehen.
+  - Ein Klick auf das Kabel löst es.
+  - Kanäle in der unteren Reihe verschieben = Reihenfolge auf den Fadern; ausblenden = nicht
+    auf der UF8.
+- **Lernen:** UF8-Element wählen, in der echten Console etwas bewegen, und das Abo liefert den
+  Pfad. Das Kabel erscheint.
+- **Was dafür ins Datenmodell muss:**
+  - Eine eigene Belegung pro UAD-Layer in `bindings.json` (`"uad": {...}`), additiv:
+    Kanalreihenfolge und ausgeblendete Kanäle, je Taste ein Ziel (Pfad aus der Erlaubt-Liste)
+    und eine Art (an/aus, halten, Wert).
+  - Ohne Eintrag gilt die Werkseinstellung aus Abschnitt 4.
 
 ---
 
