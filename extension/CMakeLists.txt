@@ -1174,6 +1174,16 @@ if(NOT WIN32)
     if(WIN32)
         target_link_libraries(rme_osc_probe PRIVATE ws2_32)
     endif()
+
+    # What a Mackie Control host (UA Midi Control) sends to a surface: a virtual
+    # CoreMIDI port pair that logs it, decoded by McuLayer.h. Sends nothing of its
+    # own (docs/mcu-probe-runbook.md). macOS only.
+    if(APPLE)
+        add_executable(mcu_port_probe tools/mcu_port_probe.cpp)
+        target_include_directories(mcu_port_probe PRIVATE src)
+        target_link_libraries(mcu_port_probe PRIVATE
+            "-framework CoreMIDI" "-framework CoreFoundation")
+    endif()
 endif()
 
 # ----- ORC ---------------------------------------------------------------------
