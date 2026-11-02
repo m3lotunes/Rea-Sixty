@@ -16,6 +16,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+// macOS has no MSG_NOSIGNAL; the accepted socket gets SO_NOSIGPIPE instead.
+#ifndef MSG_NOSIGNAL
+  #define MSG_NOSIGNAL 0
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -82,6 +87,9 @@ struct Server {
             if (::poll(&pl, 1, 50) <= 0) continue;
             const int c = ::accept(lfd, nullptr, nullptr);
             if (c < 0) continue;
+#if defined(SO_NOSIGPIPE)
+            { int one = 1; ::setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one)); }
+#endif
             { std::lock_guard<std::mutex> lk(mx); cfd = c; }
             uad::Framer fr;
             char buf[8192];
