@@ -490,7 +490,8 @@ Alle vier annehmen. Wenn wir selbst senden: 0x14.
    - Fader, Touch an, V-Pots und Tasten werden sofort als MCU-Bytes gesendet, wenn
      `g_mcuActiveLayer >= 0`.
    - Kein Umweg über die 30-Hz-Queue. Das Muster gibt es schon (`main.cpp:28600`).
-6. **Maler `mcuPaintSurface_`** statt `pushZonesForVisibleSlots`:
+6. **Maler** statt `pushZonesForVisibleSlots`, seit 02.11. `mcusurf::Surface::paint`
+   (`McuSurface.cpp`), siehe Baustein F. Ursprünglich geplant:
    - Läuft über `uf8strips::paintStrip`. Dessen `View` hat noch kein Feld für die untere
      Scribble-Zeile.
    - `Uf8Strips.h` ist mit ORC geteilt. Das Feld muss dort additiv dazukommen (gesetzt, aber
@@ -592,6 +593,18 @@ zeigt es nicht. Nebenwirkung: UAMC trägt neue virtuelle Ports selbst in seine L
 4. **D** `McuPort`: Endpunkte, feste ID, Status, Handshake. Ab hier mit MIDI Monitor sichtbar.
 5. **E** UF8 → MCU: Fader, Touch, V-Pots, Tasten. Prüfen mit MIDI Monitor.
 6. **F** MCU → UF8: Schatten, Maler (LCD, LEDs, Motor, Ring), Betreten/Verlassen. Prüfen mit UAMC.
+   - **Kern von E und F gebaut 02.11., ohne REAPER:** `McuSurface.{h,cpp}`. UF8-Frames hinein,
+     MCU heraus und umgekehrt. Er nutzt `Uf8Frames.h`, `Uf8Fader.h`, `Uf8Strips.h`, `Protocol`
+     und `dbToVuByte_`, ohne Kopien. ORC könnte ihn genauso einbinden.
+   - **Getestet gegen eine virtuelle UF8** (`Uf8Sim.h`: liest die Frames an das Gerät, baut die
+     Frames vom Gerät) und einen nachgespielten Host in `test_mcu_surface`. Das ist der
+     Abnahmetest aus dem Auftrag ohne Studio. Der Nutzer war am 02.11. nicht im Studio.
+   - Für `main.cpp` bleibt danach nur der Anschluss:
+     - USB-Thread → `fromUf8`,
+     - Core-MIDI-Queue → `fromHost`,
+     - Timer → `paint` statt `pushZonesForVisibleSlots`,
+     - dazu die Stellen aus Abschnitt 3.
+   - Alles unter einem Mutex.
 7. **G** Meter.
 8. **H** Soft-Key-Bänke, Beschriftung, Transportmodus, Master-Fader (Entscheid 1).
 9. **I** Handbuch „MCU layer (UF8)“, dieser Plan mit „gemessen / vermutet“.
