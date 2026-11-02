@@ -111,6 +111,35 @@ Handbuch, sie stammen aus der MCU-Spezifikation [W21].
   die acht View-Tasten, Save, Cancel, Enter, Drop, Fussschalter [S. 94]. Das ist ein Hinweis darauf,
   was UA-Software überhaupt auswertet.
 
+### 2.3a Die Bitwig-Belegung von SSL [Hb S. 124–133]: die, die der Nutzer hatte (2.5)
+
+- **V-POT-Bank = Assign-Tasten:** 1 PAN, 2 SEND, 3 PLUGIN, 4 EQ+, 5 TRACK REMOTES, 6 PROJECT REMOTES,
+  7 CLIP LAUNCHER, 8 NAME/VALUE [S. 129]. Die PAN-Taste rechts ist ebenfalls PAN.
+- **SEND/PLUG-IN 1–8** wählen im SEND-Modus den Send, im PLUGIN-Modus das Plug-in, bei EQ+ und den
+  Remotes die Seite. Im PAN-Modus haben sie keine Funktion. **CHANNEL** im SEND-Modus: alle Sends der
+  gewählten Spur [S. 129 f.].
+- **PAGE ◄ ►:** vorherige/nächste Parameterseite bzw. Send. Im PAN-Modus wählen sie die
+  vorherige/nächste Spur [S. 128].
+- **FINE/SHIFT = SHIFT** (mehrere Spuren solo, Gruppe auf/zu mit SEL) [S. 128]. Daran hängt das
+  Alt-Monitor-Mapping des Nutzers (2.5).
+- **Automation:**
+  - Es gelten OFF, READ, WRITE, LATCH und TOUCH. TRIM gilt nicht.
+  - OFF = Automation wiederherstellen [S. 128].
+- **Cursor:**
+  - ↑/← vorherige, ↓/→ nächste Spur. ZOOM schaltet den Zoom.
+  - Bei Sends und Plug-ins blättern ↑/↓ [S. 126].
+  - Transportmodus wie bei Logic (CHANNEL halten) [S. 127].
+- **Encoder:** NAV = Abspielkopf (mit SHIFT feiner). NUDGE ist frei. FOCUS = Mausrad [S. 126].
+- **Quick 1–3:** Arranger/Mix umschalten, Global View, SSL-Plug-in einfügen [S. 128].
+- **Selection Mode:** NORM = SEL wählt, REC = SEL ist Rec-Arm, AUTO ohne Funktion [S. 125].
+- **User Bank 1:** REWIND, FORWARD, STOP, PLAY, RECORD, LOOP, PUNCH IN, PUNCH OUT.
+- **User Bank 2:** METRONOME, TEMPO, CUE MARKER, PREV MARKER, NEXT MARKER, GROOVE, INS. SSL PLUGIN,
+  UNDO.
+- **User Bank 3–5:** frei [S. 132].
+- **LCD:** UpLCD = 6 Zeichen Spurname, LowLCD = Wert. Beim Fader-Bewegen zeigt LowLCD dB [S. 124 f.].
+- **Welche MCU-Note** SSL für EQ+, TRACK REMOTES, PROJECT REMOTES, CLIP LAUNCHER und für
+  SEND/PLUG-IN 1–8 sendet, steht nicht im Handbuch. Messen (Abschnitt 8 A).
+
 ### 2.4 Die UF8 und Rea-Sixty heute [Code]
 
 **Die UF8 hat kein eigenes USB-MIDI.** Sie hängt nur am Hersteller-Interface (VID 0x31E9 /
@@ -185,13 +214,79 @@ Der MCU-Layer bekommt deshalb eigene Endpunkte. Die alten bleiben unverändert.
 
 ### 2.5 Auf dem Mac des Nutzers [Mac]
 
-*Die Inspektion läuft (Remote-Control-Sitzung vom 02.11.). Ergebnisse folgen hier: vorhandene
-MIDI-Ports (SSL V-MIDI ohne SSL 360°?), UAMC-Einstellungen (Ports, Mode, Order), das
-SSL-360°-Profil von Layer 3 und die Layer-Arten in `bindings.json`.*
+Nur lesende Inspektion am 02.11.2026 über Remote Control (Bericht `~/ReaSixty-MCU/inspection-report.md`
+auf dem Mac). Die Umgebung:
 
-Aus dem Screenshot vom 02.11.: UAMC 5.11.2, Lizenz Midi+Mackie, Session „MELOTUNES REC“. Im
-MIDI-Mapping-Modus auf einem IAC-Port „Apollo…“: Volume = CC 1, Mute = CC 22 (Momentary). Kanäle:
-UAD 1/2, AVALON, ADAT 2–8, REAPER, VoX Return, AUX 1/2, TALKBACK, CUE OUTPUT, MONITOR.
+- macOS 14.7.2, arm64.
+- Es laufen REAPER, UA Midi Control 5.11.2 und UAD Console.
+- **SSL 360° läuft nicht.** Der Dienst `com.sslcontrolroom.daemon` wurde beendet. Die Version ist
+  2.1.12.
+- ORC ist nicht installiert.
+
+**Die SSL-V-MIDI-Ports gibt es nur, solange SSL 360° läuft.** Ohne SSL 360° existiert kein
+„SSL V-MIDI Port 1–12“, und unter `/Library/Audio/MIDI Drivers` liegt nichts. Das bestätigt 2.2: Es
+sind virtuelle Endpunkte von SSL360Core. Deshalb findet UAMC heute keinen Mackie-Partner mehr.
+
+**Das alte Profil war Bitwig, nicht Logic.**
+
+- In SSL 360° stehen die V-MIDI-Ports 1–8 auf „Reaper MCU“ und **9–12 auf „Bitwig MCU“**.
+- Layer 3 = „DAW 3“, also Port 9.
+- Für Layer 3 sind die Bitwig-Soft-Key-Modi für Automation und Send/Plug-in eingeschaltet.
+- Die Bitwig-Belegung steht im Handbuch auf S. 124–133 (Abschnitt 2.3a).
+
+**UAMC hängt an einer festen Port-ID und an einer MCU-Note.**
+
+- Das Preset `MELOTUNES.ua` enthält genau ein eigenes Mapping: **Alt-Monitor-Auswahl ← Note On 70
+  (0x46), Velocity 127, Kanal 1, von „SSL V-MIDI Port 9 Source“, Quell-ID 1821581804.**
+- SSL 360° hat für Port 9 dieselbe ID gespeichert. SSL vergibt also feste IDs, und UAMC merkt sich
+  Mappings über diese ID.
+- 0x46 ist MCU **SHIFT**. Im Bitwig-Profil liegt SHIFT auf der UF8-Taste **FINE/SHIFT** [Hb S. 128].
+  Der Nutzer hat also FINE/SHIFT auf Layer 3 als Alt-Monitor-Taste benutzt.
+- **Folgen:**
+  - FINE muss auf dem MCU-Layer 0x46 senden, nicht 0x49 wie im Logic-Profil.
+  - „Rea-Sixty MCU“ braucht eine eigene feste ID.
+  - Das Alt-Monitor-Mapping muss in UAMC einmal auf den neuen Port umgehängt werden. Die SSL-ID zu
+    übernehmen wäre falsch, sie kollidiert, sobald SSL 360° läuft.
+
+**UAMC-Ports heute** (alle aktiv, `order` 0):
+
+| Eingang | Ausgang | `mode` |
+|---|---|---|
+| IAC Bus 2 | IAC Apollo_IN | 0 |
+| IAC Apollo_IN | IAC Bus 1 DAW | 1 |
+| reaper_uf8 out | – | 0 |
+| KONTROL S49 (4 Ports) | dieselben | 0 |
+
+- „SSL V-MIDI Port 9“ steht nicht mehr in der Liste. Ob `mode` 1 „Mackie“ bedeutet, ist offen.
+- Die „… DAW“-Ports (z. B. `reaper_uf8 out DAW`, `IAC-Treiber Apollo_IN DAW`) legt UAMC selbst an
+  (2.1).
+- **Der IAC-Treiber ist offline.** Die echten IAC-Busse existieren gerade nicht.
+
+**Rea-Sixty heute** (`bindings.json` Version 57, `reaper_rea-sixty.dylib` vom 30.10.):
+
+| Layer | Art | Bemerkung |
+|---|---|---|
+| 1 | REAPER | |
+| 2 | REAPER | mit leerem CC-Rest |
+| 3 | **MIDI CC** | Ausgang „IAC-Treiber – Apollo_IN“, 6 Seiten, Werkseinstellung (Fader CC 1, 11, 2, 21, 7, 10, 74, 71) |
+
+Der Rückfall über den CC-Layer (Entscheid 10) ist also schon eingerichtet. Er kann aber nicht
+gehen, solange der IAC-Treiber offline ist (Audio-MIDI-Setup → IAC-Treiber → „Gerät ist online“).
+
+**SSL-360°-Log:**
+
+- Die UF8 erscheint als „V-UF8 (1)“, also als virtuelle Kachel, weil Rea-Sixty das USB-Gerät hält.
+- Heute bis 18:28 kamen **7.830 SysEx-Fehler**: „Ran out of data reading sequence of sys. ex. UMP
+  data messages“ / „unable to convert it to a valid MidiPacket“. Abgeschnittene SysEx sind an einem
+  SSL-Port angekommen. Port und Absender stehen nicht im Log.
+- Für uns heißt das: SysEx über Paketgrenzen sauber zusammensetzen und Bruchstücke verwerfen, ohne
+  den Zustand zu stören.
+
+Aus dem Screenshot vom 02.11.:
+
+- UAMC 5.11.2, Lizenz Midi+Mackie, Session „MELOTUNES REC“.
+- MIDI-Mapping auf IAC „Apollo…“: Volume = CC 1, Mute = CC 22 (Momentary).
+- Kanäle: UAD 1/2, AVALON, ADAT 2–8, REAPER, VoX Return, AUX 1/2, TALKBACK, CUE OUTPUT, MONITOR.
 
 ---
 
@@ -238,6 +333,12 @@ anderes tut.
 Vorlage ist das Logic-Profil von SSL (2.3), angepasst an das, was UAMC nutzt (2.1). Alles, was
 nicht aus dem Handbuch kommt, ist ein Vorschlag und steht unter den Entscheiden (Abschnitt 7).
 
+**Korrektur nach der Mac-Inspektion (2.5):** Der Nutzer hatte das **Bitwig**-Profil (2.3a). Daraus
+folgt mindestens: **FINE/SHIFT sendet SHIFT 0x46**, nicht ALT 0x49. Daran hängt sein
+Alt-Monitor-Mapping in UAMC. Die V-POT-Bank folgt der Bitwig-Reihenfolge, so weit die MCU-Noten
+dafür bekannt sind. Die Logic-Spalten unten bleiben als Rückfall stehen, bis der Mitschnitt
+(8 A) die Bitwig-Noten zeigt.
+
 ### 4.1 Strips (UF8 → MCU)
 
 | UF8 | MCU | Bemerkung |
@@ -263,7 +364,7 @@ Die UF8-IDs stammen aus `docs/buttons-leds-quickref.md`, die MCU-Nummern aus [W2
 | PLUGIN (0x50) | PLUG-IN 0x2B | Hb S. 45 |
 | CHANNEL (0x51) | ? Vorschlag TRACK 0x28 | Entscheid 4 |
 | SEND/PLUG-IN 1–8 (0x48–4F) | ? Vorschlag Global View 0x3E–45 | Entscheid 3 |
-| FINE (0x6F) | ALT/CMD 0x49 | Hb S. 44 (Logic) |
+| FINE (0x6F) | **SHIFT 0x46** (Bitwig, Hb S. 128; das Alt-Monitor-Mapping des Nutzers hängt daran). Logic hätte ALT/CMD 0x49 | Mac 2.5 |
 | Automation OFF/READ/WRITE/TRIM/LATCH/TOUCH (0x58–5D) | –/0x4A/0x4B/0x4C/0x4E/0x4D | Hb S. 44; OFF hat in MCU keine eigene Note [vermutet: READ/OFF teilen sich 0x4A] |
 | Zoom-Kreuz ↑ ↓ ← → (0x7A/7E/7B/7D) | Cursor 0x60/61/62/63 | Hb S. 45 |
 | Zoom-Mitte ◯ (0x7C) | ZOOM 0x64 | Hb S. 43 |
@@ -375,7 +476,7 @@ Alle vier annehmen. Wenn wir selbst senden: 0x14.
 | # | Frage | Vorschlag |
 |---|---|---|
 | 1 | **Master-Fader:** UAMC legt Master/Monitor darauf, die UF8 hat keinen | CHANNEL-Encoder im eigenen Modus (z. B. FOCUS) als Master-Fader relativ zum Schattenwert. Sonst bleibt Monitor nur in der Console |
-| 2 | Welches SSL-Profil lag auf Layer 3? | Mac-Inspektion bzw. Mitschnitt. Annahme: Logic |
+| 2 | Welches SSL-Profil lag auf Layer 3? | **Geklärt: Bitwig MCU** (2.5). Vorlage wird Bitwig, die fehlenden Noten liefert der Mitschnitt |
 | 3 | SEND/PLUG-IN 1–8 | Global View 0x3E–45 (UAMC nutzt Inputs/Aux/Outputs …). Alternative: frei |
 | 4 | CHANNEL-Taste, QUICK 1–3, NAV/NUDGE/FOCUS, Fussschalter | wie in 4.2; v1 fest, später einstellbar wie beim CC-Layer |
 | 5 | SEL-Modus NORM/REC auf dem MCU-Layer | eigener Zustand des MCU-Layers, damit REAPERs Modus unberührt bleibt |
@@ -408,7 +509,20 @@ Das klärt:
 - Welche UF8-Taste unter dem SSL-Profil welche MCU-Note sendet.
 - Ob SSL 360° Blinken selbst taktet.
 
-**B. Ports ohne SSL 360°:** Gibt es „SSL V-MIDI Port 9“, wenn nur Rea-Sixty läuft? (Abschnitt 2.5)
+Für den Mitschnitt muss REAPER zu sein, denn Rea-Sixty hält die UF8. SSL 360° muss laufen, sonst
+gibt es Port 9 nicht (2.5). In UAMC muss Port 9 wieder im Mackie-Modus eingetragen werden.
+
+**B. Ports ohne SSL 360°:** **gemessen [Mac]:** Ohne SSL 360° gibt es keinen V-MIDI-Port.
+
+**B2. Sonde ohne SSL (Alternative zu A für die UAMC-Seite):** ein kleines eigenständiges
+Programm auf dem Mac, keine Änderung an Rea-Sixty.
+
+- Es legt „Rea-Sixty MCU Probe“ (Source + Destination) mit fester ID an.
+- Es schreibt 60 s lang alles mit, was UAMC im Mackie-Modus sendet.
+- Auf eine Device Query antwortet es wahlweise.
+
+Das zeigt Handshake, Geräte-ID, LCD-, Ring-, Meter- und Master-Verkehr. Die Tastenbelegung von SSL
+zeigt es nicht. Nebenwirkung: UAMC trägt neue virtuelle Ports selbst in seine Liste ein.
 
 **C. Am Gerät, nach dem ersten Bau:**
 
