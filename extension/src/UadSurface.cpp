@@ -478,6 +478,13 @@ void Surface::paint(std::int64_t now, Out& out)
             v.chanNum = " ";
             v.drive   = true;
             v.faderPb = 0;
+            // No channels at all (the Console is not running, or not read yet): say so
+            // on the first strip instead of a dark surface.
+            if (s == 0 && strips_.empty()) {
+                v.upper     = "UAD";
+                v.valueLine = uf8ValueLine("UAD Console", "offline");
+                lower       = "offline";
+            }
         }
         // The soft key above the strip: its function in the current soft-key bank.
         static const char* const kModes[3] = {"PAN", "SEND", "INPUTS"};

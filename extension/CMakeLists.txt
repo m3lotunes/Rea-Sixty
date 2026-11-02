@@ -913,6 +913,13 @@ if(NOT WIN32)
         src/Protocol.cpp src/Uf1Text.cpp src/TrackName.cpp)
     target_include_directories(test_uad_surface PRIVATE src "${WDL_DIR}")
     add_test(NAME uad_surface COMMAND test_uad_surface)
+    # The socket and the session over a real localhost connection to a stand-in
+    # engine: connect, walk, write, push, reconnect (UadClient.cpp).
+    add_executable(test_uad_client tests/test_uad_client.cpp src/UadClient.cpp src/UadSurface.cpp
+        src/UadModel.cpp src/Protocol.cpp src/Uf1Text.cpp src/TrackName.cpp)
+    target_include_directories(test_uad_client PRIVATE src "${WDL_DIR}")
+    target_link_libraries(test_uad_client PRIVATE Threads::Threads)
+    add_test(NAME uad_client COMMAND test_uad_client)
     # The MIDI CC layer in bindings.json: kind, CC set, presets, ccLayerActive.
     add_executable(test_midi_cc_bindings tests/test_midi_cc_bindings.cpp
         src/Bindings.cpp src/KeyMacro.cpp src/LogPath.cpp)
