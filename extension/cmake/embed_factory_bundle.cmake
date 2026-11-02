@@ -21,24 +21,17 @@ string(LENGTH "${HEX_CONTENT}" HEX_LEN)
 math(EXPR BYTE_COUNT "${HEX_LEN} / 2")
 
 # Emit 16 bytes per line for readable diffs.
-set(BYTES "")
-set(IDX 0)
-while(IDX LESS HEX_LEN)
-    string(SUBSTRING "${HEX_CONTENT}" ${IDX} 2 BYTE)
-    if(BYTES STREQUAL "")
-        set(BYTES "0x${BYTE}")
-    else()
-        # Insert newlines every 32 hex chars (16 bytes) for legibility.
-        math(EXPR BYTES_SO_FAR "${IDX} / 2")
-        math(EXPR LINE_BREAK "${BYTES_SO_FAR} % 16")
-        if(LINE_BREAK EQUAL 0)
-            set(BYTES "${BYTES},\n    0x${BYTE}")
-        else()
-            set(BYTES "${BYTES}, 0x${BYTE}")
-        endif()
-    endif()
-    math(EXPR IDX "${IDX} + 2")
-endwhile()
+# ⇨ LINEAR, NOT A BYTE LOOP. The loop this replaces appended one byte at a time
+# to a growing string, which CMake copies on every set(): quadratic in the file
+# size. With the user manual (321 KB) embedded that one step ran for well over
+# ten minutes (2026-11-02). Two regex passes give the same array: first a line
+# break after every 16 bytes (32 hex characters), then "0x.., " for every byte.
+string(REGEX REPLACE "([0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])"
+       "\\1\n" LINED "${HEX_CONTENT}")
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1, " BYTES "${LINED}")
+string(REPLACE ", \n" ",\n    " BYTES "${BYTES}")
+# No trailing ", " or indentation after the last byte.
+string(REGEX REPLACE "[, \n]+$" "" BYTES "${BYTES}")
 
 # Symbol name override for reuse (Windows WinUSB INF uses the same
 # helper). Defaults to the factory bundle's name when not overridden.
