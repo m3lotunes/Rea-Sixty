@@ -907,6 +907,12 @@ if(NOT WIN32)
     add_executable(test_uad_model tests/test_uad_model.cpp src/UadModel.cpp)
     target_include_directories(test_uad_model PRIVATE src "${WDL_DIR}")
     add_test(NAME uad_model COMMAND test_uad_model)
+    # The side-car between a virtual UF8 (Uf8Sim.h) and the virtual engine: the
+    # acceptance test without the studio (UadSurface.cpp).
+    add_executable(test_uad_surface tests/test_uad_surface.cpp src/UadSurface.cpp src/UadModel.cpp
+        src/Protocol.cpp src/Uf1Text.cpp src/TrackName.cpp)
+    target_include_directories(test_uad_surface PRIVATE src "${WDL_DIR}")
+    add_test(NAME uad_surface COMMAND test_uad_surface)
     # The MIDI CC layer in bindings.json: kind, CC set, presets, ccLayerActive.
     add_executable(test_midi_cc_bindings tests/test_midi_cc_bindings.cpp
         src/Bindings.cpp src/KeyMacro.cpp src/LogPath.cpp)
