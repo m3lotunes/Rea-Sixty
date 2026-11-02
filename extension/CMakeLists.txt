@@ -902,6 +902,12 @@ if(NOT WIN32)
     add_executable(test_mcu_layer tests/test_mcu_layer.cpp)
     target_include_directories(test_mcu_layer PRIVATE src)
     add_test(NAME mcu_layer COMMAND test_mcu_layer)
+    # MCU layer between a virtual UF8 (Uf8Sim.h) and a scripted host: the manual
+    # acceptance test of the plan, without the studio (McuSurface.cpp).
+    add_executable(test_mcu_surface tests/test_mcu_surface.cpp src/McuSurface.cpp
+        src/Protocol.cpp src/Uf1Text.cpp src/TrackName.cpp)
+    target_include_directories(test_mcu_surface PRIVATE src)
+    add_test(NAME mcu_surface COMMAND test_mcu_surface)
     # The MIDI CC layer in bindings.json: kind, CC set, presets, ccLayerActive.
     add_executable(test_midi_cc_bindings tests/test_midi_cc_bindings.cpp
         src/Bindings.cpp src/KeyMacro.cpp src/LogPath.cpp)
