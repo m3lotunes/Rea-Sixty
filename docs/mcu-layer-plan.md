@@ -512,12 +512,12 @@ Alle vier annehmen. Wenn wir selbst senden: 0x14.
 
 | # | Frage | Vorschlag |
 |---|---|---|
-| 1 | **Master-Fader:** UAMC legt Master/Monitor darauf, die UF8 hat keinen | CHANNEL-Encoder im eigenen Modus (z. B. FOCUS) als Master-Fader relativ zum Schattenwert. Sonst bleibt Monitor nur in der Console |
+| 1 | **Master-Fader:** UAMC legt Master/Monitor darauf, die UF8 hat keinen | **Entschieden 02.11.:** kein Sonderweg. Laut Nutzer lag Master/Monitor früher als normaler Fader in einer späteren Bank (MONITOR ist ein Kanal in UAMCs Liste). Werte auf Kanal 9 (`E8`) landen nur im Schatten |
 | 2 | Welches SSL-Profil lag auf Layer 3? | **Geklärt: Bitwig MCU** (2.5). Vorlage wird Bitwig, die fehlenden Noten liefert der Mitschnitt |
 | 3 | SEND/PLUG-IN 1–8 | Global View 0x3E–45 (UAMC nutzt Inputs/Aux/Outputs …). Alternative: frei |
 | 4 | CHANNEL-Taste, QUICK 1–3, NAV/NUDGE/FOCUS, Fussschalter | wie in 4.2; v1 fest, später einstellbar wie beim CC-Layer |
 | 5 | SEL-Modus NORM/REC auf dem MCU-Layer | eigener Zustand des MCU-Layers, damit REAPERs Modus unberührt bleibt |
-| 6 | Meter in v1? | ja, nach Fader/LCD/LEDs. Die Helfer passen (`dbToVuByte_`, TotalMix-Muster) |
+| 6 | Meter in v1? | **Entschieden 02.11.: ja**, nach Fader/LCD/LEDs. Die Helfer passen (`dbToVuByte_`, TotalMix-Muster) |
 | 7 | Portname | fest „Rea-Sixty MCU“, in Settings änderbar. **Nicht** „SSL V-MIDI Port 9“ nachbauen: Kollision, falls SSL360Core läuft, und es sähe aus wie SSLs Port |
 | 8 | CHANNEL halten = Transportmodus | Option in Settings, Standard an (wie SSL) |
 | 9 | Ohne REAPER (ORC hat die UF8) | v1: kein MCU. Später könnte ORC denselben Kern hosten (Apollo ohne REAPER) |
@@ -571,8 +571,10 @@ zeigt es nicht. Nebenwirkung: UAMC trägt neue virtuelle Ports selbst in seine L
 
 ## 9. Bausteine und Reihenfolge
 
-1. **A** Messungen (Abschnitt 8 A, B), Entscheide 1–10.
-2. **B** `McuLayer.h` + `test_mcu_layer` (CMake wie `test_midi_cc_layer`).
+1. **A** Messungen (Abschnitt 8 A und B2, **beide**, Entscheid 02.11.). Werkzeug und Anleitung:
+   `extension/tools/mcu_port_probe.cpp`, `docs/mcu-probe-runbook.md` (gebaut 02.11.).
+2. **B** `McuLayer.h` + `test_mcu_layer` (CMake wie `test_midi_cc_layer`). **Gebaut 02.11.**,
+   Test grün; unter Linux 43/45 Tests grün, die zwei übrigen bauen dort schon vorher nicht.
 3. **C** `LayerKind::Mcu`, JSON, `g_mcuActiveLayer`, Settings-Zeile (Typ, Portname, Status
    „Port offen / letzte Nachricht vor X s“, Option CHANNEL halten).
 4. **D** `McuPort`: Endpunkte, feste ID, Status, Handshake. Ab hier mit MIDI Monitor sichtbar.
