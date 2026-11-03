@@ -2889,19 +2889,22 @@ void drawUf8UadVector(ImGui_Context* ctx)
 void drawUf8UadControls(ImGui_Context* ctx)
 {
     const uadside::Status st = reasixty_uadStatus();
-    if (!st.online)
-        ImGui_Checkbox(ctx, "Offline test: the virtual UF8 writes without the Apollo (never 48V)", &s_uadOfflineTest);
+    if (!st.online) {
+        ImGui_Checkbox(ctx, "Offline test##uad_offline", &s_uadOfflineTest);
+        if (ImGui_IsItemHovered(ctx, nullptr))
+            ImGui_SetTooltip(ctx, "The virtual UF8 writes to UAD Console without the Apollo (never 48V).");
+    }
     const bool offTest = s_uadOfflineTest && !st.online;
     char line[160];
     if (st.online)
-        snprintf(line, sizeof(line), "Writes to UAD Console.  Sent so far: %u", st.sent);
+        snprintf(line, sizeof(line), "Writes to UAD Console. Sent: %u", st.sent);
     else if (offTest)
-        snprintf(line, sizeof(line), "OFFLINE TEST, writes to UAD Console.  Sent so far: %u", st.sent);
+        snprintf(line, sizeof(line), "Offline test, writes. Sent: %u", st.sent);
     else
-        snprintf(line, sizeof(line), "Apollo offline, nothing is written.  Sent so far: %u", st.sent);
+        snprintf(line, sizeof(line), "Apollo offline, nothing written. Sent: %u", st.sent);
     int pushed = 0;
     if (!st.online && !offTest) { ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF); ++pushed; }
-    ImGui_Text(ctx, line);
+    ImGui_TextWrapped(ctx, line);
     if (pushed) ImGui_PopStyleColor(ctx, &pushed);
     int m = s_uadLedMode ? 1 : 0;
     ImGui_Text(ctx, "Mode");
@@ -2909,8 +2912,10 @@ void drawUf8UadControls(ImGui_Context* ctx)
     if (ImGui_RadioButtonEx(ctx, "Use##uad_mode_use", &m, 0)) s_uadLedMode = false;
     ImGui_SameLine(ctx, nullptr, nullptr);
     if (ImGui_RadioButtonEx(ctx, "Edit LEDs##uad_mode_col", &m, 1)) s_uadLedMode = true;
-    ImGui_TextDisabled(ctx, s_uadLedMode ? "A click on a key picks it for the LED menu below."
-                                         : "Clicks and drags on the UF8 work the Console.");
+    ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0x8890A0FF);
+    ImGui_TextWrapped(ctx, s_uadLedMode ? "A click on a key picks it for the LED menu below."
+                                        : "Clicks and drags on the UF8 work the Console.");
+    ImGui_PopStyleColor(ctx, nullptr);
 }
 
 // The LED menu beside the UAD layer's UF8 (Frank 03.11.2026: "rechts neben dem
@@ -2920,11 +2925,7 @@ void drawUf8UadControls(ImGui_Context* ctx)
 void drawUf8UadInspector(ImGui_Context* ctx)
 {
     const int layer = uadSettingsLayer_();
-    if (!s_uadLedMode) {
-        ImGui_TextDisabled(ctx, "LEDs: switch Mode to 'Edit LEDs',");
-        ImGui_TextDisabled(ctx, "then click a key on the UF8.");
-        return;
-    }
+    if (!s_uadLedMode) return;
     if (layer < 0 || s_uadLedKey < 0) {
         ImGui_Text(ctx, "Click a key on the UF8.");
         return;
@@ -2941,8 +2942,10 @@ void drawUf8UadInspector(ImGui_Context* ctx)
     auto it = looks.find(id);
     const bool own = it == looks.end();
     ledlook::Look l = own ? ledlook::Look{} : it->second;
-    ImGui_TextDisabled(ctx, own ? "Own lamp (as Rea-Sixty lights it). Change anything below to set a look."
-                                : "Active = on, Inactive = available but off.");
+    ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0x8890A0FF);
+    ImGui_TextWrapped(ctx, own ? "Own lamp (as Rea-Sixty lights it). Change anything below to set a look."
+                               : "Active = on, Inactive = available but off.");
+    ImGui_PopStyleColor(ctx, nullptr);
     if (reasixty_drawLedLook(ctx, l, "uad")) uf8::bindings::setUadLed(layer, id, &l);
     if (!own && ImGui_Button(ctx, "Own lamp##uad_led_own", nullptr, nullptr)) uf8::bindings::setUadLed(layer, id, nullptr);
     const bool strip = (id >= 0x18 && id <= 0x1F) || (id >= 0x20 && id <= 0x37) || (id >= 0x48 && id <= 0x4F);
@@ -8837,13 +8840,17 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
                     ImGui_BeginGroup(ctx);
                     drawUf8UadVector(ctx);
                     ImGui_EndGroup(ctx);
-                    if (availW >= 1000.0 + 360.0) ImGui_SameLine(ctx, nullptr, nullptr);
+                    if (availW >= 1000.0 + 350.0) ImGui_SameLine(ctx, nullptr, nullptr);
                     else ImGui_Separator(ctx);
                     ImGui_BeginGroup(ctx);
+                    // A narrow column: texts wrap at 340 px from where it starts.
+                    double wrapX = ImGui_GetCursorPosX(ctx) + 340.0;
+                    ImGui_PushTextWrapPos(ctx, &wrapX);
                     drawUf8UadLayer(ctx, s_editLayer);
                     drawUf8UadControls(ctx);
                     ImGui_Separator(ctx);
                     drawUf8UadInspector(ctx);
+                    ImGui_PopTextWrapPos(ctx);
                     ImGui_EndGroup(ctx);
                 } else {
                     // Header, then the UF8 with the picked control beside it
@@ -8857,12 +8864,16 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
                     ImGui_BeginGroup(ctx);
                     drawUf8CcVirtual(ctx, s_editLayer, pg, test);
                     ImGui_EndGroup(ctx);
-                    if (availW >= 1000.0 + 360.0) ImGui_SameLine(ctx, nullptr, nullptr);
+                    if (availW >= 1000.0 + 350.0) ImGui_SameLine(ctx, nullptr, nullptr);
                     else ImGui_Separator(ctx);
                     ImGui_BeginGroup(ctx);
+                    // A narrow column: texts wrap at 340 px from where it starts.
+                    double wrapX = ImGui_GetCursorPosX(ctx) + 340.0;
+                    ImGui_PushTextWrapPos(ctx, &wrapX);
                     drawUf8CcHeader(ctx, s_editLayer, reasixty_ccLivePage(), &test);
                     ImGui_Separator(ctx);
                     drawUf8CcInspector(ctx, s_editLayer, pg);
+                    ImGui_PopTextWrapPos(ctx);
                     ImGui_EndGroup(ctx);
                 }
             } else {
