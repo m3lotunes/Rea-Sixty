@@ -20,9 +20,12 @@
 #include "UadClient.h"
 
 #include "UadProto.h"
+#include "Uf8Fader.h"
+#include "Uf8Sim.h"   // the UF8's input frames, for the virtual UF8 in Settings
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 
 #if defined(_WIN32)
   using uad_socket_t = SOCKET;
@@ -186,7 +189,7 @@ bool Side::fromUf8(const uf8frames::Frame& f, std::int64_t nowMs, std::vector<Fr
     std::lock_guard<std::mutex> lk(mx_);
     uadsurf::Out o;
     const bool mine = surf_.fromUf8(f, nowMs, o);
-    for (auto& c : o.cmds) client_.send(std::move(c));
+    for (auto& c : o.cmds) { ++sent_; client_.send(std::move(c)); }
     for (auto& x : o.uf8) uf8.push_back(std::move(x));
     return mine;
 }
@@ -205,6 +208,7 @@ void Side::tick(std::int64_t nowMs, bool shown, std::vector<Frame>& uf8)
     for (const auto& m : client_.take())
         for (const auto& next : model_.onMessage(m)) client_.send(uad::get(next));
     if (client_.connected()) {
+        surf_.refresh();
         const auto wanted = surf_.wantedSubscriptions();
         const std::set<std::string> want(wanted.begin(), wanted.end());
         for (const auto& p : wanted)
@@ -219,11 +223,52 @@ void Side::tick(std::int64_t nowMs, bool shown, std::vector<Frame>& uf8)
             }
         }
     }
-    if (!shown) return;
+    if (!shown) {
+        // No UF8 to paint (or another layer on it): time still has to pass for
+        // the virtual UF8's touches and the writes waiting for their window.
+        uadsurf::Out o;
+        surf_.service(nowMs, o);
+        for (auto& c : o.cmds) { ++sent_; client_.send(std::move(c)); }
+        return;
+    }
     uadsurf::Out o;
     surf_.paint(nowMs, o);
-    for (auto& c : o.cmds) client_.send(std::move(c));
+    for (auto& c : o.cmds) { ++sent_; client_.send(std::move(c)); }
     for (auto& x : o.uf8) uf8.push_back(std::move(x));
+}
+
+void Side::virtualFrame_(const uf8frames::Frame& f, std::int64_t nowMs, bool offlineTest)
+{
+    std::lock_guard<std::mutex> lk(mx_);
+    if (!client_.connected()) return;
+    surf_.refresh();
+    surf_.setOfflineWrites(offlineTest);
+    uadsurf::Out o;
+    surf_.fromUf8(f, nowMs, o);
+    surf_.setOfflineWrites(false);
+    for (auto& c : o.cmds) { ++sent_; client_.send(std::move(c)); }
+    // o.uf8 (limp, echo) is for a real fader under a hand; the virtual one has none.
+}
+
+void Side::virtualTouch(int strip, bool on, std::int64_t nowMs, bool offlineTest)
+{
+    virtualFrame_(uf8sim::touch(strip, on), nowMs, offlineTest);
+}
+
+void Side::virtualFader(int strip, double tapered, std::int64_t nowMs, bool offlineTest)
+{
+    const int pb = static_cast<int>(std::lround(std::clamp(tapered, 0.0, 1.0) * uf8fader::kPbMax));
+    virtualFrame_(uf8sim::fader(strip, pb, /*hiBit*/ true), nowMs, offlineTest);
+}
+
+void Side::virtualKey(std::uint8_t id, bool pressed, std::int64_t nowMs, bool offlineTest)
+{
+    virtualFrame_(uf8sim::key(id, pressed), nowMs, offlineTest);
+}
+
+void Side::virtualPot(int pot, int detents, std::int64_t nowMs, bool offlineTest)
+{
+    virtualFrame_(uf8sim::vpot(pot, std::clamp(detents, -31, 31)), nowMs, offlineTest);
 }
 
 void Side::invalidate()
@@ -247,7 +292,57 @@ Status Side::status()
     st.connection = client_.connection();
     st.online = model_.online();
     if (!model_.devices.empty()) st.device = model_.devices[0].name;
-    st.channels = static_cast<int>(model_.strips().size());
+    const std::vector<uad::Strip> strips = model_.strips();
+    st.channels = static_cast<int>(strips.size());
+    st.sent     = sent_;
+    st.banks    = strips.empty() ? 0 : (st.channels + 7) / 8;
+    st.bank     = surf_.bank();
+    st.softBank = surf_.softBank();
+    st.mode     = static_cast<int>(surf_.mode());
+    st.send     = surf_.send();
+    for (int i = 0; i < 8; ++i) {
+        const std::size_t idx = static_cast<std::size_t>(st.bank * 8 + i);
+        if (idx < strips.size()) st.names[i] = model_.name(strips[idx]);
+    }
+    const int sel = surf_.selected();
+    if (sel >= 0 && sel < st.channels) {
+        const uad::Strip& s = strips[static_cast<std::size_t>(sel)];
+        st.selectedName = model_.name(s);
+        const uad::Input* in = model_.input(s);
+        st.selectedPreamp = in && in->hasPreamp;
+    }
+    st.list.reserve(strips.size());
+    for (const uad::Strip& s : strips) {
+        Status::Channel ch;
+        ch.name = model_.name(s);
+        if (const uad::Input* in = model_.input(s)) {
+            ch.type = in->ioType;
+            ch.stereo = in->stereo;
+            ch.preamp = in->hasPreamp;
+            ch.mute = in->mute;
+            ch.solo = in->solo;
+            ch.phantom = in->hasPreamp && in->preamp.phantom;
+            ch.faderDb = in->faderDb;
+            ch.faderTapered = in->faderTapered;
+            ch.pan = in->pan;
+            ch.gainDb = in->preamp.gainDb;
+        } else if (const uad::Aux* ax = model_.aux(s)) {
+            ch.type = "AUX";
+            ch.aux = true;
+            ch.stereo = true;
+            ch.mute = ax->mute;
+            ch.faderDb = ax->faderDb;
+            ch.faderTapered = ax->faderTapered;
+        }
+        st.list.push_back(std::move(ch));
+    }
+    for (const uad::Strip& s : strips) {
+        if (const uad::Input* in = model_.input(s)) {
+            for (std::size_t k = 0; k < in->sends.size() && k < 8; ++k)
+                st.sendNames[k] = in->sends[k].name.empty() ? in->sends[k].id : in->sends[k].name;
+            break;
+        }
+    }
     return st;
 }
 

@@ -60,6 +60,20 @@ public:
     void paint(std::int64_t nowMs, Out& out);
     void invalidate();
 
+    // Take the channel list from the model now (paint does it too). Without a UF8
+    // nothing paints, and the subscriptions below would stay empty.
+    void refresh();
+
+    // What time does without painting: touch releases, the 48V hold, the writes
+    // waiting for their window. paint calls it; without a UF8 the owner does.
+    void service(std::int64_t nowMs, Out& out);
+
+    // Offline test, for Settings' virtual UF8 only: writes go out while the
+    // interface is offline (the engine reports changes then, measured 03.11.2026;
+    // whether it takes writes is what this test shows). Never
+    // 48V. The owner sets it around one input and clears it again.
+    void setOfflineWrites(bool on) { offlineWrites_ = on; }
+
     // What the client should be subscribed to for what is on the surface now.
     std::vector<std::string> wantedSubscriptions() const;
 
@@ -83,6 +97,8 @@ private:
     };
     struct Pending { std::string json; std::int64_t lastSentMs = -1000000; bool waiting = false; };
 
+    bool devOk_(const uad::Device& D) const { return D.online || offlineWrites_; }
+    bool offlineWrites_ = false;
     int  stripAt_(int s) const;            // surface strip 0..7 -> index into strips, -1
     void write_(const std::string& prop, const std::string& json, std::int64_t now, Out& out);
     void flush_(std::int64_t now, Out& out);

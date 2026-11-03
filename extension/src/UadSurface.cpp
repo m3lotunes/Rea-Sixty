@@ -135,7 +135,10 @@ void Surface::write_(const std::string& prop, const std::string& json, std::int6
     // Nothing while the device is gone: the engine keeps its old tree (measured).
     const auto seg = split(prop);
     const int d = std::atoi(seg[1].c_str());
-    if (d < 0 || d >= static_cast<int>(m_.devices.size()) || !m_.devices[static_cast<std::size_t>(d)].online) return;
+    if (d < 0 || d >= static_cast<int>(m_.devices.size()) || !devOk_(m_.devices[static_cast<std::size_t>(d)])) return;
+    // The offline test (Settings' virtual UF8) never switches phantom power.
+    if (!m_.devices[static_cast<std::size_t>(d)].online && prop.size() >= 4
+        && prop.compare(prop.size() - 4, 4, "/48V") == 0) return;
     Pending& p = pending_[prop];
     p.json = json;
     if (now - p.lastSentMs >= kWriteMs) {
@@ -214,7 +217,7 @@ bool Surface::fromUf8(const uf8frames::Frame& f, std::int64_t now, Out& out)
         for (std::size_t di = 0; di < m_.devices.size(); ++di) {
             const uad::Device& D = m_.devices[di];
             const int o = D.monitorOutput();
-            if (!D.online || o < 0) continue;
+            if (!devOk_(D) || o < 0) continue;
             const uad::Output& mon = D.outputs[static_cast<std::size_t>(o)];
             const std::string prop = uad::Model::devicePath(static_cast<int>(di)) + "/outputs/" +
                                      std::to_string(o) + "/CRMonitorLevel";
@@ -286,7 +289,7 @@ void Surface::key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out)
         for (std::size_t di = 0; di < m_.devices.size(); ++di) {
             const uad::Device& D = m_.devices[di];
             const int o = D.monitorOutput();
-            if (!D.online || o < 0) continue;
+            if (!devOk_(D) || o < 0) continue;
             toggle_(uad::Model::devicePath(static_cast<int>(di)) + "/outputs/" + std::to_string(o) + "/Mute",
                     D.outputs[static_cast<std::size_t>(o)].mute, now, out);
             break;
@@ -308,7 +311,7 @@ void Surface::soft_(int key, bool pressed, std::int64_t now, Out& out)
         for (std::size_t di = 0; di < m_.devices.size(); ++di) {
             const uad::Device& D = m_.devices[di];
             const int o = D.monitorOutput();
-            if (!D.online || o < 0) continue;
+            if (!devOk_(D) || o < 0) continue;
             const std::string dev = uad::Model::devicePath(static_cast<int>(di));
             const std::string outp = dev + "/outputs/" + std::to_string(o) + "/";
             const uad::Output& mon = D.outputs[static_cast<std::size_t>(o)];
@@ -388,13 +391,16 @@ std::string Surface::potText_(int idx, bool full) const
     return b;
 }
 
-void Surface::paint(std::int64_t now, Out& out)
+void Surface::refresh()
 {
     strips_ = m_.strips();
     const int maxBank = strips_.empty() ? 0 : (static_cast<int>(strips_.size()) - 1) / 8;
     bank_ = std::clamp(bank_, 0, maxBank);
     if (selected_ >= static_cast<int>(strips_.size())) selected_ = -1;
+}
 
+void Surface::service(std::int64_t now, Out& out)
+{
     for (int s = 0; s < 8; ++s) {
         Touch& t = touch_[static_cast<std::size_t>(s)];
         if (t.down && t.releasePending && now - t.releaseMs >= kTouchQuietMs) {
@@ -411,6 +417,16 @@ void Surface::paint(std::int64_t now, Out& out)
         }
     }
     flush_(now, out);
+}
+
+void Surface::paint(std::int64_t now, Out& out)
+{
+    strips_ = m_.strips();
+    const int maxBank = strips_.empty() ? 0 : (static_cast<int>(strips_.size()) - 1) / 8;
+    bank_ = std::clamp(bank_, 0, maxBank);
+    if (selected_ >= static_cast<int>(strips_.size())) selected_ = -1;
+
+    service(now, out);
     if (fresh_) {
         out.uf8.push_back(uf8::buildSelectedStripBitmask(0));
         fresh_ = false;
@@ -581,6 +597,17 @@ std::vector<std::string> Surface::wantedSubscriptions() const
         for (std::size_t i = 0; i < D.inputs.size(); ++i)
             for (const char* p : {"Name", "StereoName", "EnabledByUser", "ChannelHidden"})
                 w.push_back(dev + "/inputs/" + std::to_string(i) + "/" + p);
+    }
+    // Every channel's fader, mute, solo, pan and preamp, not only the bank's: the
+    // Settings picture shows the whole Console live (no meters, those stream).
+    for (const uad::Strip& st : strips_) {
+        for (const char* p : {"FaderLevelTapered", "FaderLevel", "Mute"})
+            w.push_back(uad::Model::propPath(st, p));
+        if (const uad::Input* in = m_.input(st)) {
+            for (const char* p : {"Solo", "Pan"}) w.push_back(uad::Model::propPath(st, p));
+            if (in->hasPreamp)
+                for (const char* p : {"Gain", "48V"}) w.push_back(uad::Model::propPath(st, "preamps/0/") + p);
+        }
     }
     for (int s = 0; s < 8; ++s) {
         const int idx = stripAt_(s);

@@ -41262,7 +41262,9 @@ static void uadTick_()
             if (g_sync) g_sync->invalidate();
         }
     }
-    if (idx < 0 && any) {
+    // Also on the UAD layer with no UF8 open: uadPaintSurface_ returns early then,
+    // and the engine's updates would pile up unread (the Settings picture froze).
+    if (any && (idx < 0 || !g_dev || !g_dev->isOpen())) {
         std::vector<std::vector<uint8_t>> none;
         g_uadSide.tick(nowMs_(), false, none);
     }
@@ -55931,6 +55933,7 @@ int  reasixty_ccLivePage()            { return g_ccState.page; }
 // visible to SettingsScreen_MidiCc.cpp nor reported as missing by the Linux link
 // (MSVC caught it, 2026-11-02).
 uadside::Status reasixty_uadStatus() { return g_uadSide.status(); }
+uadside::Side& reasixty_uadSide() { return g_uadSide; }   // Settings' virtual UF8
 int  reasixty_ccInputStatus()         { return g_ccInStatus; }
 bool reasixty_bankScrollByOne()       { return g_bankScrollByOne.load(); }
 void reasixty_setBankScrollByOne(bool on)

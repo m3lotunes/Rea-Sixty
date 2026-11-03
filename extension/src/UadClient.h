@@ -71,6 +71,24 @@ struct Status {
     std::uint32_t connection = 0;   // bumps with every new connection
     std::string device;          // first device's name
     int         channels = 0;
+    // What the surface shows now, for the Settings picture of the UF8.
+    int         bank = 0, banks = 0;   // current bank of 8, number of banks
+    int         softBank = 0;          // 0 V-POT (modes), 1 Monitor, 2 Preamp
+    int         mode = 0;              // uadsurf::PotMode: 0 Pan, 1 Send, 2 Preamp
+    int         send = 0;              // the send SEND/PLUG-IN picked
+    std::string selectedName;          // the SEL channel, empty = none
+    bool        selectedPreamp = false;
+    std::string names[8];              // the strips of the current bank, empty = none
+    std::string sendNames[8];          // the sends of the first input (AUX 1, ...)
+    // Every channel in Console order, for the Console picture under the UF8.
+    struct Channel {
+        std::string name, type;        // type: MIC, LINE, ADAT, VIRT, AUX, ...
+        bool   aux = false, stereo = false, preamp = false;
+        bool   mute = false, solo = false, phantom = false;
+        double faderDb = -144.0, faderTapered = 0.0, pan = 0.0, gainDb = 0.0;
+    };
+    std::vector<Channel> list;
+    std::uint32_t sent = 0;            // set commands sent to the engine so far
 };
 
 class Side {
@@ -88,16 +106,27 @@ public:
     // Timer. `shown`: the UF8 is on the UAD layer, paint it (frames into `uf8`).
     void tick(std::int64_t nowMs, bool shown, std::vector<Frame>& uf8);
     void invalidate();                           // entering the layer
+
+    // Settings' virtual UF8 (main thread): inputs built byte for byte as the UF8
+    // sends them (Uf8Sim) and run through the same surface, allowlist and write
+    // gate. offlineTest: write while the interface is offline (never 48V).
+    void virtualTouch(int strip, bool on, std::int64_t nowMs, bool offlineTest);
+    void virtualFader(int strip, double tapered, std::int64_t nowMs, bool offlineTest);
+    void virtualKey(std::uint8_t id, bool pressed, std::int64_t nowMs, bool offlineTest);
+    void virtualPot(int pot, int detents, std::int64_t nowMs, bool offlineTest);
     std::uint32_t stripRgb(int s);
     Status status();
 
 private:
+    void virtualFrame_(const uf8frames::Frame& f, std::int64_t nowMs, bool offlineTest);
+
     std::mutex            mx_;
     uad::Client           client_;
     uad::Model            model_;
     uadsurf::Surface      surf_{model_};
     std::set<std::string> subscribed_;
     std::uint32_t         conn_ = 0;
+    std::uint32_t         sent_ = 0;   // set commands sent (Settings shows it)
 };
 
 }  // namespace uadside

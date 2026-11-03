@@ -392,6 +392,32 @@ bool drawControlEditor_(ImGui_Context* ctx, midicc::Layer& L, int page)
 // editor instead of the schematic).
 bool drawUf8LayerKindRow(ImGui_Context* ctx, int layer)
 {
+    // All three layers, always, each with its type; the one the UF8 is on (and
+    // this page edits) in blue. A click takes the UF8 there, like its LAYER key.
+    // Before, the keys were only here on CC and UAD layers and lived in the
+    // schematic on REAPER layers, so they seemed to vanish (user, 03.11.2026).
+    ImGui_Text(ctx, "Layers");
+    for (int l = 0; l < 3; ++l) {
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        const bnd::LayerKind k = bnd::layerKind(l);
+        char id[48];
+        snprintf(id, sizeof(id), " Layer %d: %s ##lk_go_%d", l + 1,
+                 k == bnd::LayerKind::MidiCc ? "MIDI CC"
+                 : k == bnd::LayerKind::Uad  ? "UAD"
+                                             : "REAPER", l);
+        int pushed = 0;
+        if (l == layer) { ImGui_PushStyleColor(ctx, ImGui_Col_Button, 0x4477CCFF); ++pushed; }
+        if (ImGui_Button(ctx, id, nullptr, nullptr)) {
+            const bnd::ButtonId b = l == 0 ? bnd::ButtonId::Layer1
+                                  : l == 1 ? bnd::ButtonId::Layer2 : bnd::ButtonId::Layer3;
+            bnd::dispatch(b, /*pressed*/ true);
+            bnd::dispatch(b, /*pressed*/ false);
+        }
+        if (pushed) ImGui_PopStyleColor(ctx, &pushed);
+    }
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    ImGui_TextDisabled(ctx, "   blue = the layer the UF8 is on and this page edits");
+
     char hdr[48];
     snprintf(hdr, sizeof(hdr), "Editing: Layer %d", layer + 1);
     ImGui_Text(ctx, hdr);
@@ -416,19 +442,6 @@ bool drawUf8LayerKindRow(ImGui_Context* ctx, int layer)
     }
     tip_(ctx, "MIDI CC: faders, V-Pots and keys send MIDI on this layer.\n"
               "UAD Console: the UF8 is a mixer for UAD Console (Universal Audio).");
-    if (bnd::layerKind(layer) == bnd::LayerKind::Reaper) return false;
-    // On a CC or UAD layer the schematic is not drawn, so the layer keys are here.
-    for (int l = 0; l < 3; ++l) {
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        char id[32];
-        snprintf(id, sizeof(id), "Layer %d##lk_go_%d", l + 1, l);
-        if (ImGui_Button(ctx, id, nullptr, nullptr)) {
-            const bnd::ButtonId b = l == 0 ? bnd::ButtonId::Layer1
-                                  : l == 1 ? bnd::ButtonId::Layer2 : bnd::ButtonId::Layer3;
-            bnd::dispatch(b, /*pressed*/ true);
-            bnd::dispatch(b, /*pressed*/ false);
-        }
-    }
     return bnd::layerKind(layer) != bnd::LayerKind::Reaper;
 }
 
@@ -452,23 +465,11 @@ void drawUf8UadLayer(ImGui_Context* ctx, int layer)
     ImGui_Text(ctx, line);
     tip_(ctx, "Rea-Sixty talks to UAD Console's mixer engine on this computer (127.0.0.1:4710).\n"
               "Nothing is written while the interface is offline.");
+    ImGui_TextDisabled(ctx, "Green keys work on this layer, grey ones do nothing here. "
+                            "Hover or click for what they do.");
     ImGui_Spacing(ctx);
-    ImGui_Separator(ctx);
-    ImGui_Spacing(ctx);
-    ImGui_Text(ctx, "On this layer");
-    static const char* const kRows[] = {
-        "Faders               Console channel levels, 8 per bank, in Console order (stereo pairs once, then AUX)",
-        "BANK < >             next / previous 8 channels",
-        "SOLO / CUT / SEL     Solo / Mute / select the channel (for the preamp keys)",
-        "V-Pots               PAN, SEND or INPUTS (preamp gain), picked on the V-POT soft-key bank",
-        "V-Pot push           PAN: centre; SEND: send on/off",
-        "SEND/PLUG-IN 1-6     which send: AUX 1, AUX 2, CUE 1-4",
-        "Soft-key bank 1      monitor: ALT, DIM, MONO, MUTE",
-        "Soft-key bank 2      preamp of the selected channel: 48V (hold), PAD, PHASE, LOW CUT, HI-Z",
-        "CHANNEL encoder      monitor level (FINE: half steps); push: monitor mute",
-        "LAYER 1-3, 360       as on every layer",
-    };
-    for (const char* r : kRows) ImGui_TextDisabled(ctx, r);
+    // The picture of the UF8 and the Console follows (SettingsScreen.cpp,
+    // drawUf8UadVector).
 }
 
 // The CC layer's editor, in place of the schematic.

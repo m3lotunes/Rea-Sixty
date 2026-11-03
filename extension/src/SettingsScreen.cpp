@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include "BindingsPick.h"
@@ -33,8 +34,12 @@
 #include "TrackName.h"      // abbreviateTrackName_ for AutoLearn's strip labels
 #include "UserPluginCatalog.h"
 #include "HttpClient.h"     // in-app "Publish to exchange" upload
+#include "UadClient.h"       // the UAD Console layer's picture (drawUf8UadVector)
 #include "reaper_imgui_functions.h"
 #include "reaper_plugin_functions.h"
+
+uadside::Status reasixty_uadStatus();   // main.cpp: the UAD Console layer's state
+uadside::Side&  reasixty_uadSide();     // main.cpp: the layer itself (virtual UF8)
 
 // Host-OS modifier read for Keyboard-macro capture. ReaImGui receives mac
 // modifiers already SWELL-swapped (⌘ arrives as VK_CONTROL, ⌃ as VK_LWIN —
@@ -2211,6 +2216,460 @@ void drawUf8Vector(ImGui_Context* ctx, ButtonId& sel,
     renderBindingContextMenu_(ctx, editQuick, editSubBank);
 
     ImGui_PopFont(ctx);
+}
+
+// The UF8 as it is on a UAD Console layer, with the Console below it
+// (docs/uad-console-plan.md, Baustein G, first step: the picture, read only).
+// Same geometry and palette as drawUf8Vector, so both layers look alike. Every
+// key says what it does here (hover, or click for the line under the picture),
+// live from the engine: names, bank, soft-key bank, V-Pot mode, send, faders.
+// The eight faders of the bank are wired to their Console channels below. Only
+// the LAYER keys act on a click; nothing here writes to the Console.
+// ⛔ Only call shapes drawUf8Vector already uses (no Bezier: lines in steps).
+void drawUf8UadVector(ImGui_Context* ctx)
+{
+    constexpr float W = 1000, H_UF8 = 490;
+    const uadside::Status st = reasixty_uadStatus();
+    const int nCh = static_cast<int>(st.list.size());
+    const float H = H_UF8 + (nCh > 0 ? 300.0f : 60.0f);
+
+    // The virtual UF8: what is dragged or held sends the UF8's own frames
+    // through the layer (reasixty_uadSide), so it tests the real path.
+    static bool s_offlineTest = false;   // per session, off at every start
+    if (!st.online) {
+        ImGui_Checkbox(ctx, "Offline test: the virtual UF8 below writes to UAD Console without the Apollo (never 48V)",
+                       &s_offlineTest);
+    }
+    const bool offTest = s_offlineTest && !st.online;
+    {
+        char line[160];
+        if (st.online)
+            snprintf(line, sizeof(line), "Virtual UF8: writes to UAD Console.   Sent so far: %u", st.sent);
+        else if (offTest)
+            snprintf(line, sizeof(line), "Virtual UF8: OFFLINE TEST, writes to UAD Console.   Sent so far: %u", st.sent);
+        else
+            snprintf(line, sizeof(line), "Virtual UF8: Apollo offline, nothing is written (tick Offline test).   Sent so far: %u", st.sent);
+        int pushed = 0;
+        if (!st.online && !offTest) { ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF); ++pushed; }
+        ImGui_Text(ctx, line);
+        if (pushed) ImGui_PopStyleColor(ctx, &pushed);
+    }
+    uadside::Side& side = reasixty_uadSide();
+    // The clock of main.cpp's nowMs_ (steady_clock, ms), which the UAD tick uses.
+    const std::int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    ImGui_PushFont(ctx, /*font*/ nullptr, 12.0);
+    double oxd = 0, oyd = 0;
+    ImGui_GetCursorScreenPos(ctx, &oxd, &oyd);
+    ImGui_InvisibleButton(ctx, "uf8_uad_canvas", W, H, /*flags*/ nullptr);
+    const bool canvasActive  = ImGui_IsItemActive(ctx);
+    const bool canvasHovered = ImGui_IsItemHovered(ctx, /*flags*/ nullptr);
+    int leftBtn = 0;
+    const bool canvasClicked = ImGui_IsItemClicked(ctx, &leftBtn);
+    double mxd = 0, myd = 0;
+    ImGui_GetMousePos(ctx, &mxd, &myd);
+    VCanvas c { ctx, ImGui_GetWindowDrawList(ctx),
+                static_cast<float>(oxd), static_cast<float>(oyd) };
+    const float mx = static_cast<float>(mxd) - c.ox;
+    const float my = static_cast<float>(myd) - c.oy;
+    auto inside = [&](float x, float y, float w, float h) {
+        return canvasHovered && mx >= x && mx <= x + w && my >= y && my <= y + h;
+    };
+
+    // What the mouse holds on the virtual UF8: a key (its UF8 id), a fader
+    // (strip, its position) or a V-Pot (pot 0..7, 8 = CHANNEL; drag = turn).
+    static int    s_heldKey = -1;
+    static int    s_dragFader = -1;
+    static double s_dragT = 0.0;
+    static int    s_dragPot = -1;
+    static float  s_potY = 0.0f;
+    static bool   s_potTurned = false;
+    auto pressKey = [&](int id) {
+        side.virtualKey(static_cast<std::uint8_t>(id), true, now, offTest);
+        s_heldKey = id;
+    };
+
+    // The element clicked last: its id (x/y of the tile) and its description.
+    static int         s_selKey = -1;
+    static std::string s_selDesc;
+    std::string hoverDesc;
+
+    // A key of the UAD layer. active: it does something here; lit: its state is on.
+    auto tile = [&](float x, float y, float w, float h, const char* label,
+                    const std::string& desc, bool active, bool lit = false,
+                    int uf8Key = -1) -> bool {
+        const int key = static_cast<int>(x) * 10000 + static_cast<int>(y);
+        const bool hot = inside(x, y, w, h);
+        const bool clicked = hot && canvasClicked && leftBtn == 0;
+        if (clicked) { s_selKey = key; s_selDesc = std::string(label) + ": " + desc; }
+        if (clicked && active && uf8Key >= 0) pressKey(uf8Key);
+        const bool selected = key == s_selKey;
+        if (!active) {
+            rect_(c, x, y, w, h, 0x1A1E24FF, 0x383C44FF, 3.0);
+            ImGui_PushFont(ctx, nullptr, 10.0);
+            drawTextCentered_(c, x + w / 2.0f, y + h / 2.0f, 0x70747CFF, label);
+            ImGui_PopFont(ctx);
+            if (hot) hoverDesc = std::string(label) + ": not used on the UAD layer";
+            return clicked;
+        }
+        const uint32_t fill = selected ? 0x4477CCFF : hot ? 0x3A4253FF
+                            : lit ? 0x2F5A36FF : 0x2C3A2EFF;
+        const uint32_t border = selected ? 0xAACCFFFF : lit ? 0x7FD07FFF : 0x6FA86FFF;
+        rect_(c, x, y, w, h, fill, border, 3.5);
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        drawTextCentered_(c, x + w / 2.0f, y + h / 2.0f,
+                          selected ? 0xFFFFFFFF : 0xD0D4DAFF, label);
+        ImGui_PopFont(ctx);
+        if (hot) hoverDesc = std::string(label) + ": " + desc;
+        return clicked;
+    };
+    auto ring = [&](float x, float y, float w, float h) {
+        ImGui_DrawList_AddRect(c.dl, c.ox + x - 2, c.oy + y - 2,
+                               c.ox + x + w + 2, c.oy + y + h + 2,
+                               0x40C040FF, /*rounding*/ nullptr,
+                               /*flags*/ nullptr, /*thickness*/ nullptr);
+    };
+    auto groupLabel = [&](float cx, float y, const char* text) {
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        double tw = 0, th = 0;
+        ImGui_CalcTextSize(c.ctx, text, &tw, &th, nullptr, nullptr);
+        drawText_(c, cx - static_cast<float>(tw) / 2.0f, y, 0x9CA0AAFF, text);
+        ImGui_PopFont(ctx);
+    };
+    auto shortName = [](const std::string& s, std::size_t n) {
+        return s.size() > n ? s.substr(0, n) : s;
+    };
+
+    // ---- Chassis ----
+    rect_(c, 4, 4, W - 8, H_UF8 - 8, 0x14181EFF, 0x2A3038FF, 8.0);
+
+    // ---- Strips ----
+    constexpr float kStripX0 = 138, kStripW = 80, kStripGap = 7;
+    static const char* const kModes[3] = {"PAN", "SEND", "INPUTS"};
+    static const char* const kModeDesc[3] = {
+        "V-Pots set the pan", "V-Pots set the send picked with SEND/PLUG-IN 1-6",
+        "V-Pots set the preamp gain (whole dB, channels with a preamp)"};
+    static const char* const kMon[4] = {"ALT", "DIM", "MONO", "MUTE"};
+    static const char* const kMonDesc[4] = {
+        "monitor: ALT speakers on/off", "monitor: dim", "monitor: mono", "monitor: mute"};
+    static const char* const kPre[5] = {"48V", "PAD", "PHASE", "LOW CUT", "HI-Z"};
+    static const char* const kPreDesc[5] = {
+        "48V phantom power of the selected channel, only after holding 0.5 s",
+        "pad of the selected channel", "phase of the selected channel",
+        "low cut of the selected channel", "Hi-Z of the selected channel"};
+    const char* const potWhat = st.mode == 0 ? "pan" : st.mode == 1 ? "send level" : "preamp gain";
+    float faderX[8] = {0};
+    for (int i = 0; i < 8; ++i) {
+        const float sx = kStripX0 + i * (kStripW + kStripGap);
+        const std::string& nm = st.names[i];
+        const bool has = !nm.empty();
+        const int chIdx = st.bank * 8 + i;
+        const uadside::Status::Channel* ch =
+            (chIdx >= 0 && chIdx < nCh) ? &st.list[static_cast<std::size_t>(chIdx)] : nullptr;
+
+        // Top soft key: its function in the current soft-key bank.
+        if (st.softBank == 0 && i < 3) {
+            tile(sx + 6, 12, kStripW - 12, 22, kModes[i], kModeDesc[i], true, st.mode == i, 0x18 + i);
+        } else if (st.softBank == 1 && i < 4) {
+            tile(sx + 6, 12, kStripW - 12, 22, kMon[i], kMonDesc[i], true, false, 0x18 + i);
+        } else if (st.softBank == 2 && i < 5) {
+            tile(sx + 6, 12, kStripW - 12, 22, kPre[i], kPreDesc[i], st.selectedPreamp, false, 0x18 + i);
+        } else {
+            char n[4]; snprintf(n, sizeof(n), "%d", i + 1);
+            tile(sx + 6, 12, kStripW - 12, 22, n, "", false);
+        }
+        // Scribble: the channel's name and type.
+        rect_(c, sx + 4, 40, kStripW - 8, 58, 0x080C12FF, 0x444A55FF, 2.0);
+        if (has) {
+            drawTextCentered_(c, sx + kStripW / 2.0f, 58, 0x4488DDFF, shortName(nm, 10).c_str());
+            if (ch) {
+                ImGui_PushFont(ctx, nullptr, 10.0);
+                drawTextCentered_(c, sx + kStripW / 2.0f, 74, 0x8890A0FF,
+                                  shortName(ch->type, 6).c_str());
+                char val[24] = "";
+                if (st.mode == 0 && !ch->aux) {
+                    if (std::fabs(ch->pan) < 0.005) snprintf(val, sizeof(val), "Pan C");
+                    else snprintf(val, sizeof(val), "Pan %s%.0f", ch->pan < 0 ? "L" : "R",
+                                  std::fabs(ch->pan) * 100.0);
+                } else if (st.mode == 2 && ch->preamp) {
+                    snprintf(val, sizeof(val), "Gain %+.0f", ch->gainDb);
+                } else if (st.mode == 1 && !ch->aux) {
+                    snprintf(val, sizeof(val), "Send %d", st.send + 1);
+                }
+                if (*val) drawTextCentered_(c, sx + kStripW / 2.0f, 89, 0xC8B070FF, val);
+                ImGui_PopFont(ctx);
+            }
+        }
+        // V-Pot.
+        const float vx = sx + kStripW / 2.0f, vy = 124;
+        const bool vHot = has && inside(vx - 18, vy - 18, 36, 36);
+        if (vHot && canvasClicked && leftBtn == 0) {
+            s_dragPot = i; s_potY = my; s_potTurned = false;
+        }
+        circle_(c, vx, vy, 18, 0x14181EFF,
+                s_dragPot == i ? 0xAACCFFFF : vHot ? 0x6688AAFF : 0x4A5060FF);
+        circle_(c, vx, vy, 14, 0x2A3038FF, 0x555A66FF);
+        {
+            const float a = (st.mode == 0 && ch && !ch->aux)
+                          ? static_cast<float>(std::clamp(ch->pan, -1.0, 1.0)) * 2.356f : 0.0f;
+            line_(c, vx + std::sin(a) * 8.0f, vy - std::cos(a) * 8.0f,
+                  vx + std::sin(a) * 16.0f, vy - std::cos(a) * 16.0f, 0xCCCCCCFF, 2.0);
+        }
+        if (vHot) {
+            hoverDesc = std::string("V-Pot: drag up/down = ") + potWhat + " of " + nm
+                      + (st.mode == 0 ? "; click = push (centre)" : st.mode == 1 ? "; click = push (send on/off)" : "");
+            if (canvasClicked && leftBtn == 0) { s_selKey = -2 - i; s_selDesc = hoverDesc; }
+        }
+        // SOLO / CUT / SEL.
+        tile(sx + 8, 152, kStripW - 16, 16, "SOLO", "solo " + nm, has, ch && ch->solo, 0x20 + i * 3);
+        tile(sx + 8, 172, kStripW - 16, 16, "CUT", "mute " + nm, has, ch && ch->mute, 0x20 + i * 3 + 1);
+        tile(sx + 8, 192, kStripW - 16, 16, "SEL",
+             "select " + nm + " for the preamp keys (soft-key bank 2)", has,
+             has && nm == st.selectedName, 0x20 + i * 3 + 2);
+        // Fader, where the Console fader is.
+        const float fx = sx + kStripW / 2.0f, fyTop = 220, fyBot = 440;
+        faderX[i] = fx;
+        for (int t = 0; t <= 10; ++t) {
+            const float ty = fyTop + (fyBot - fyTop) * (t / 10.0f);
+            line_(c, fx - 12, ty, fx - 12 + ((t % 5 == 0) ? 6.0f : 3.0f), ty, 0x6A6E78FF, 1.0);
+        }
+        rect_(c, fx - 1.5f, fyTop, 3, fyBot - fyTop, 0x444B55FF, 0x000000FF, 1.0);
+        if (has) {
+            const bool fHot = inside(fx - 14, fyTop - 8, 28, fyBot - fyTop + 16);
+            if (fHot && canvasClicked && leftBtn == 0) {
+                s_dragFader = i;
+                s_dragT = ch ? std::clamp(ch->faderTapered, 0.0, 1.0) : 0.0;
+                side.virtualTouch(i, true, now, offTest);
+            }
+            if (s_dragFader == i && canvasActive) {
+                const double t = std::clamp(static_cast<double>((fyBot - my) / (fyBot - fyTop)), 0.0, 1.0);
+                if (std::fabs(t - s_dragT) > 0.0005) {
+                    s_dragT = t;
+                    side.virtualFader(i, t, now, offTest);
+                }
+            }
+            const double t = s_dragFader == i ? s_dragT
+                           : ch ? std::clamp(ch->faderTapered, 0.0, 1.0) : 0.0;
+            const float capY = fyBot - static_cast<float>(t) * (fyBot - fyTop);
+            rect_(c, fx - 12, capY - 7, 24, 14, fHot ? 0x8A90A0FF : 0x6A7080FF, 0x9CA0AAFF, 2.5);
+            line_(c, fx - 9, capY, fx + 9, capY, 0xE0E0E0FF, 1.5);
+            if (fHot) {
+                char db[32];
+                if (ch && ch->faderDb > -100.0) snprintf(db, sizeof(db), "%.1f dB", ch->faderDb);
+                else snprintf(db, sizeof(db), "-inf");
+                hoverDesc = "Fader: drag = level of " + nm + " (" + db + ")";
+                if (canvasClicked && leftBtn == 0) { s_selKey = -20 - i; s_selDesc = hoverDesc; }
+            }
+        }
+    }
+
+    // ---- Left panel ----
+    groupLabel(33, 8, "LAYER");
+    groupLabel(75, 8, "QUICK");
+    const int activeLayer = uf8::bindings::getQuickLayer();
+    const uf8::bindings::ButtonId layerIds[3] = {
+        uf8::bindings::ButtonId::Layer1, uf8::bindings::ButtonId::Layer2,
+        uf8::bindings::ButtonId::Layer3};
+    for (int l = 0; l < 3; ++l) {
+        const float y = 22.0f + 26.0f * l;
+        char n[4]; snprintf(n, sizeof(n), "%d", l + 1);
+        const auto kind = uf8::bindings::layerKind(l);
+        const std::string d = std::string("go to layer ") + n + " ("
+            + (kind == uf8::bindings::LayerKind::Uad ? "UAD Console"
+               : kind == uf8::bindings::LayerKind::MidiCc ? "MIDI CC" : "REAPER") + ")";
+        if (tile(15, y, 36, 22, n, d, true)) {
+            uf8::bindings::dispatch(layerIds[l], /*pressed*/ true);
+            uf8::bindings::dispatch(layerIds[l], /*pressed*/ false);
+        }
+        if (l == activeLayer) ring(15, y, 36, 22);
+        tile(57, y, 36, 22, n, "", false);
+    }
+    tile(15, 108, 78, 24, "360\xC2\xB0", "as on every layer", true);
+
+    groupLabel(54, 138, "SEND / PLUGIN");
+    for (int k = 0; k < 8; ++k) {
+        const float x = 13.0f + (k % 2) * 42.0f, y = 152.0f + (k / 2) * 26.0f;
+        const std::string& sn = st.sendNames[k];
+        char n[4]; snprintf(n, sizeof(n), "%d", k + 1);
+        const std::string lbl = sn.empty() ? std::string(n) : shortName(sn, 6);
+        tile(x, y, 38, 22, lbl.c_str(),
+             "V-Pots set send " + (sn.empty() ? std::string(n) : sn) + "; mode SEND",
+             !sn.empty(), st.mode == 1 && st.send == k, 0x48 + k);
+    }
+    tile(13, 260, 50, 22, "PLUGIN", "", false);
+    tile(67, 260, 50, 22, "CHANNEL", "", false);
+    groupLabel(65, 286, "PAGE");
+    tile(13, 300, 50, 22, "\xE2\x97\x82", "", false);
+    tile(67, 300, 50, 22, "\xE2\x96\xB8", "", false);
+    tile(13, 326, 104, 22, "FLIP", "", false);
+    groupLabel(65, 358, "AUTOMATION");
+    {
+        const char* a[6] = {"OFF", "READ", "WRITE", "TRIM", "LATCH", "TOUCH"};
+        for (int k = 0; k < 6; ++k)
+            tile(13.0f + (k % 3) * 35.0f, 372.0f + (k / 3) * 24.0f, 33, 22, a[k], "", false);
+    }
+    groupLabel(65, 428, "FOOT SWITCHES");
+    tile(13, 442, 50, 22, "FOOT 1", "", false);
+    tile(67, 442, 50, 22, "FOOT 2", "", false);
+
+    // ---- Right panel ----
+    {
+        struct B { float x, y, w; const char* lbl; const char* desc; };
+        const B banks[6] = {
+            {852, 22, 42, "V-POT", "soft keys: V-Pot mode PAN / SEND / INPUTS"},
+            {898, 22, 42, "1",     "soft keys: monitor ALT / DIM / MONO / MUTE"},
+            {944, 22, 41, "2",     "soft keys: preamp of the selected channel"},
+            {852, 46, 42, "3",     ""},
+            {898, 46, 42, "4",     ""},
+            {944, 46, 41, "5",     ""},
+        };
+        for (int b = 0; b < 6; ++b) {
+            tile(banks[b].x, banks[b].y, banks[b].w, 20, banks[b].lbl, banks[b].desc, b < 3,
+                 false, 0x68 + b);
+            if (b == st.softBank) ring(banks[b].x, banks[b].y, banks[b].w, 20);
+        }
+    }
+    tile(852, 80, 64, 22, "PAN", "V-Pots set the pan", true, st.mode == 0, 0x6E);
+    tile(921, 80, 64, 22, "FINE", "hold: monitor level and pan in finer steps", true, false, 0x6F);
+    groupLabel(918, 114, "SELECTION MODE");
+    tile(852, 128, 43, 20, "NORM", "", false);
+    tile(899, 128, 43, 20, "REC", "", false);
+    tile(946, 128, 39, 20, "AUTO", "", false);
+    {
+        constexpr float cx = 918, cy = 200, r = 32;
+        const bool hot = inside(cx - r, cy - r, 2 * r, 2 * r);
+        if (hot && canvasClicked && leftBtn == 0) { s_dragPot = 8; s_potY = my; s_potTurned = false; }
+        circle_(c, cx, cy, r, 0x14181EFF,
+                s_dragPot == 8 ? 0xAACCFFFF : hot ? 0x6688AAFF : 0x6FA86FFF);
+        circle_(c, cx, cy, r - 3, 0x252A33FF, 0x555A66FF);
+        circle_(c, cx, cy, r * 0.78f, 0x383C44FF, 0x6A6E78FF);
+        line_(c, cx, cy - r * 0.95f, cx, cy - r * 0.62f, 0xE0E0E0FF, 2.5);
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        drawTextCentered_(c, cx, 154, 0x9CA0AAFF, "MONITOR");
+        ImGui_PopFont(ctx);
+        if (hot) {
+            hoverDesc = "CHANNEL encoder: drag up/down = monitor level, 1 dB per detent (FINE: 0.5 dB); click = push (monitor mute)";
+            if (canvasClicked && leftBtn == 0) { s_selKey = -40; s_selDesc = hoverDesc; }
+        }
+    }
+    tile(852, 244, 44, 22, "NAV", "", false);
+    tile(898, 244, 44, 22, "NUDGE", "", false);
+    tile(944, 244, 41, 22, "FOCUS", "", false);
+    groupLabel(917, 300, "BANK");
+    {
+        char d[64];
+        snprintf(d, sizeof(d), "previous 8 channels (now bank %d of %d)", st.bank + 1, st.banks);
+        tile(870, 314, 42, 22, "\xE2\x97\x82", d, true, false, 0x78);
+        snprintf(d, sizeof(d), "next 8 channels (now bank %d of %d)", st.bank + 1, st.banks);
+        tile(922, 314, 42, 22, "\xE2\x96\xB8", d, true, false, 0x79);
+    }
+    drawTextCentered_(c, 500, 470, 0x9CA0AAFF, "Rea-Sixty  \xC2\xB7  UAD Console layer");
+
+    // ---- The Console, below ----
+    const float cy0 = H_UF8 + 30;
+    drawText_(c, 8, H_UF8 + 8, 0xC0C4CCFF,
+              nCh > 0 ? "UAD Console (live, every channel). Blue: the channels on the UF8 faders now; BANK moves them."
+                      : "UAD Console: no channels yet (is UAD Console running?)");
+    if (nCh > 0) {
+        const float gap = 4.0f;
+        const float cw = std::min(66.0f, (W - 16.0f - gap * (nCh - 1)) / nCh);
+        const float chH = 250.0f;
+        for (int k = 0; k < nCh; ++k) {
+            const uadside::Status::Channel& ch = st.list[static_cast<std::size_t>(k)];
+            const float x = 8.0f + k * (cw + gap);
+            const bool onUf8 = k >= st.bank * 8 && k < st.bank * 8 + 8;
+            const bool sel = !st.selectedName.empty() && ch.name == st.selectedName;
+            rect_(c, x, cy0, cw, chH, ch.aux ? 0x1E2230FF : 0x1A1F26FF,
+                  sel ? 0xAACCFFFF : onUf8 ? 0x4488DDFF : 0x3A4050FF, 3.0);
+            ImGui_PushFont(ctx, nullptr, 10.0);
+            const float mid = x + cw / 2.0f;
+            drawTextCentered_(c, mid, cy0 + 10, 0xE0E4EAFF, shortName(ch.name, 9).c_str());
+            drawTextCentered_(c, mid, cy0 + 24, 0x8890A0FF,
+                              (shortName(ch.type, 6) + (ch.stereo ? " ST" : "")).c_str());
+            char buf[32];
+            if (ch.preamp) {
+                snprintf(buf, sizeof(buf), "%+.0f dB", ch.gainDb);
+                drawTextCentered_(c, mid, cy0 + 40, 0xC8B070FF, buf);
+                if (ch.phantom) drawTextCentered_(c, mid, cy0 + 54, 0xFF5050FF, "48V");
+            }
+            if (!ch.aux) {
+                if (std::fabs(ch.pan) < 0.005) snprintf(buf, sizeof(buf), "C");
+                else snprintf(buf, sizeof(buf), "%s%.0f", ch.pan < 0 ? "L" : "R", std::fabs(ch.pan) * 100.0);
+                drawTextCentered_(c, mid, cy0 + 70, 0x9CA0AAFF, buf);
+            }
+            // M / S
+            const float bw = std::min(22.0f, cw / 2.0f - 3.0f);
+            rect_(c, mid - bw - 1, cy0 + 82, bw, 14, ch.mute ? 0xB04040FF : 0x252A33FF, 0x4A5060FF, 2.0);
+            drawTextCentered_(c, mid - bw / 2.0f - 1, cy0 + 89, 0xD0D4DAFF, "M");
+            rect_(c, mid + 1, cy0 + 82, bw, 14, ch.solo ? 0xC0A030FF : 0x252A33FF, 0x4A5060FF, 2.0);
+            drawTextCentered_(c, mid + bw / 2.0f + 1, cy0 + 89, 0xD0D4DAFF, "S");
+            // Fader.
+            const float fTop = cy0 + 106, fBot = cy0 + chH - 24;
+            rect_(c, mid - 1.5f, fTop, 3, fBot - fTop, 0x444B55FF, 0x000000FF, 1.0);
+            const float capY = fBot - static_cast<float>(std::clamp(ch.faderTapered, 0.0, 1.0)) * (fBot - fTop);
+            rect_(c, mid - 9, capY - 5, 18, 10, onUf8 ? 0x4477CCFF : 0x6A7080FF, 0x9CA0AAFF, 2.0);
+            if (ch.faderDb > -100.0) snprintf(buf, sizeof(buf), "%.1f", ch.faderDb);
+            else snprintf(buf, sizeof(buf), "-inf");
+            drawTextCentered_(c, mid, cy0 + chH - 12, 0xC0C4CCFF, buf);
+            ImGui_PopFont(ctx);
+            if (inside(x, cy0, cw, chH)) {
+                hoverDesc = ch.name + (onUf8 ? ": on UF8 fader " + std::to_string(k - st.bank * 8 + 1)
+                                             : ": on bank " + std::to_string(k / 8 + 1) + ", fader "
+                                               + std::to_string(k % 8 + 1));
+                if (canvasClicked && leftBtn == 0) { s_selKey = -100 - k; s_selDesc = hoverDesc; }
+            }
+            // The cable from the UF8 fader to this channel (in steps, a soft S).
+            if (onUf8) {
+                const float x0 = faderX[k - st.bank * 8], y0 = 446;
+                const float x1 = mid, y1 = cy0 - 2;
+                float px = x0, py = y0;
+                for (int sgm = 1; sgm <= 16; ++sgm) {
+                    const float t = sgm / 16.0f;
+                    const float u = 1.0f - t;
+                    // Cubic with both handles vertical: (x0,y0) (x0,ym) (x1,ym) (x1,y1).
+                    const float ym = (y0 + y1) / 2.0f;
+                    const float qx = u * u * u * x0 + 3 * u * u * t * x0 + 3 * u * t * t * x1 + t * t * t * x1;
+                    const float qy = u * u * u * y0 + 3 * u * u * t * ym + 3 * u * t * t * ym + t * t * t * y1;
+                    line_(c, px, py, qx, qy, 0x4488DDB0, 1.5);
+                    px = qx; py = qy;
+                }
+            }
+        }
+    }
+
+    // V-Pot / encoder: 6 px of drag = one detent, up = clockwise.
+    if (s_dragPot >= 0 && canvasActive) {
+        const int det = static_cast<int>((s_potY - my) / 6.0f);
+        if (det != 0) {
+            side.virtualPot(s_dragPot, det, now, offTest);
+            s_potY -= det * 6.0f;
+            s_potTurned = true;
+        }
+    }
+    if (!canvasActive) {
+        if (s_dragPot >= 0) {
+            if (!s_potTurned) {   // a click without a turn is the push
+                const int id = s_dragPot == 8 ? 0x76 : 0x08 + s_dragPot;
+                side.virtualKey(static_cast<std::uint8_t>(id), true, now, offTest);
+                side.virtualKey(static_cast<std::uint8_t>(id), false, now, offTest);
+            }
+            s_dragPot = -1;
+        }
+        if (s_dragFader >= 0) {
+            side.virtualTouch(s_dragFader, false, now, offTest);
+            s_dragFader = -1;
+        }
+        if (s_heldKey >= 0) {
+            side.virtualKey(static_cast<std::uint8_t>(s_heldKey), false, now, offTest);
+            s_heldKey = -1;
+        }
+    }
+
+    if (!hoverDesc.empty()) ImGui_SetTooltip(ctx, hoverDesc.c_str());
+    ImGui_PopFont(ctx);
+    ImGui_Text(ctx, s_selDesc.empty() ? "Click a key, fader or channel to see what it does on this layer."
+                                      : s_selDesc.c_str());
 }
 
 // Render the full UC1 schematic. Layout follows the SSL UC1 hardware
@@ -7734,9 +8193,10 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
             // The layer's type first. A MIDI CC layer replaces the schematic
             // with its own editor (SettingsScreen_MidiCc.cpp).
             if (drawUf8LayerKindRow(ctx, s_editLayer)) {
-                if (uf8::bindings::layerKind(s_editLayer) == uf8::bindings::LayerKind::Uad)
+                if (uf8::bindings::layerKind(s_editLayer) == uf8::bindings::LayerKind::Uad) {
                     drawUf8UadLayer(ctx, s_editLayer);
-                else
+                    drawUf8UadVector(ctx);
+                } else
                     drawUf8MidiCcLayer(ctx, s_editLayer, reasixty_ccLivePage());
             } else {
             drawUf8Vector(ctx, s_selected, s_editQuick, s_editSubBank);
