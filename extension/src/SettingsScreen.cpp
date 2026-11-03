@@ -465,6 +465,13 @@ int  reasixty_ccLivePage();          // MIDI CC layer: the page the UF8 is on
 // SettingsScreen_MidiCc.cpp
 bool drawUf8LayerKindRow(ImGui_Context* ctx, int layer);
 void drawUf8MidiCcLayer(ImGui_Context* ctx, int layer, int livePage);
+int  reasixty_ccActiveLayer();
+void reasixty_ccVirtualFader(int strip, int pb);
+void reasixty_ccVirtualVPot(int strip, int detents);
+void reasixty_ccVirtualKey(int kind, int idx, bool pressed);
+void reasixty_ccVirtualPage(int page);
+void reasixty_ccVirtualPageStep(int delta);
+int  reasixty_ccValue(int kind, int idx);
 void drawUf8UadLayer(ImGui_Context* ctx, int layer);
 int  reasixty_visibilityFollow();
 void reasixty_setVisibilityFollow(int v);
@@ -2822,6 +2829,203 @@ void drawUf8UadVector(ImGui_Context* ctx)
     ImGui_PopFont(ctx);
     ImGui_Text(ctx, s_selDesc.empty() ? "Click a key, fader or channel to see what it does on this layer."
                                       : s_selDesc.c_str());
+}
+
+// The MIDI CC layer's virtual UF8: soft-keys, V-Pots (drag = turn, click = push),
+// SEND/PLUG-IN, faders, the page keys and the foot switches, live from the layer.
+// What is clicked or dragged goes into the UF8's own input queue (main.cpp,
+// reasixty_ccVirtual*), so it sends exactly what the hardware would. Works while
+// this layer is the active one, with or without a UF8.
+void drawUf8CcVirtual(ImGui_Context* ctx, int layer)
+{
+    namespace bnd = uf8::bindings;
+    using midicc::Kind;
+    const midicc::Layer L = bnd::ccLayer(layer);
+    const bool live = reasixty_ccActiveLayer() == layer;
+    const int page = std::clamp(reasixty_ccLivePage(), 0, midicc::kPages - 1);
+    const midicc::Page& P = L.pages[static_cast<std::size_t>(page)];
+
+    ImGui_Spacing(ctx);
+    if (!live) {
+        ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF);
+        ImGui_Text(ctx, "Virtual UF8: this layer is not the active one, so nothing is sent.");
+        ImGui_PopStyleColor(ctx, nullptr);
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        char b[48];
+        snprintf(b, sizeof(b), "Switch to layer %d##cc_virt_go", layer + 1);
+        if (ImGui_Button(ctx, b, nullptr, nullptr)) {
+            const bnd::ButtonId ids[3] = {bnd::ButtonId::Layer1, bnd::ButtonId::Layer2, bnd::ButtonId::Layer3};
+            bnd::dispatch(ids[layer], true);
+            bnd::dispatch(ids[layer], false);
+        }
+    } else {
+        ImGui_Text(ctx, "Virtual UF8: click and drag to send, with or without a UF8 (the outputs set below).");
+    }
+
+    constexpr float W = 1000, H = 330;
+    ImGui_PushFont(ctx, nullptr, 12.0);
+    double oxd = 0, oyd = 0;
+    ImGui_GetCursorScreenPos(ctx, &oxd, &oyd);
+    ImGui_InvisibleButton(ctx, "uf8_cc_canvas", W, H, nullptr);
+    const bool canvasActive  = ImGui_IsItemActive(ctx);
+    const bool canvasHovered = ImGui_IsItemHovered(ctx, nullptr);
+    int leftBtn = 0;
+    const bool canvasClicked = ImGui_IsItemClicked(ctx, &leftBtn) && leftBtn == 0;
+    double mxd = 0, myd = 0;
+    ImGui_GetMousePos(ctx, &mxd, &myd);
+    VCanvas c { ctx, ImGui_GetWindowDrawList(ctx), static_cast<float>(oxd), static_cast<float>(oyd) };
+    const float mx = static_cast<float>(mxd) - c.ox, my = static_cast<float>(myd) - c.oy;
+    auto inside = [&](float x, float y, float w, float h) {
+        return canvasHovered && mx >= x && mx <= x + w && my >= y && my <= y + h;
+    };
+    std::string hoverDesc;
+
+    // What the mouse holds: a key (kind, index), a fader, a V-Pot.
+    static int   s_keyKind = -1, s_keyIdx = -1;
+    static int   s_fader = -1, s_pot = -1;
+    static float s_potY = 0.0f;
+    static bool  s_potTurned = false;
+    static int   s_faderPb = 0;
+
+    rect_(c, 4, 4, W - 8, H - 8, 0x14181EFF, 0x2A3038FF, 8.0);
+
+    auto key = [&](float x, float y, float w, float h, const std::string& label, const std::string& desc,
+                   bool usable, bool lit, int kind, int idx) {
+        const bool hot = inside(x, y, w, h);
+        const uint32_t fill = !usable ? 0x1A1E24FF : hot ? 0x3A4253FF : lit ? 0x2F5A36FF : 0x2C3A2EFF;
+        const uint32_t border = !usable ? 0x383C44FF : lit ? 0x7FD07FFF : 0x6FA86FFF;
+        rect_(c, x, y, w, h, fill, border, 3.5);
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        drawTextCentered_(c, x + w / 2.0f, y + h / 2.0f, usable ? 0xD0D4DAFF : 0x70747CFF, label.c_str());
+        ImGui_PopFont(ctx);
+        if (hot) hoverDesc = desc;
+        if (hot && canvasClicked && usable && live && kind >= 0) {
+            reasixty_ccVirtualKey(kind, idx, true);
+            s_keyKind = kind; s_keyIdx = idx;
+        }
+    };
+    auto ctlText = [&](Kind k, const midicc::Control& ct) {
+        std::string n = midicc::displayName(k, ct);
+        return n.empty() ? std::string("-") : n;
+    };
+    auto ctlDesc = [&](Kind k, const midicc::Control& ct, const char* what) {
+        if (!midicc::assigned(ct)) return std::string(what) + ": not assigned on this page";
+        char b[96];
+        snprintf(b, sizeof(b), "%s: %s %d, channel %d", what, k == Kind::SendPlugin ? "program" : "CC",
+                 ct.number, midicc::channelOf(ct, L.defaultChannel));
+        return std::string(b) + (ct.name.empty() ? "" : " (" + ct.name + ")");
+    };
+
+    constexpr float kX0 = 140, kSW = 80, kGap = 7;
+    float faderTop = 175, faderBot = 300;
+    for (int i = 0; i < midicc::kStrips; ++i) {
+        const float sx = kX0 + i * (kSW + kGap), mid = sx + kSW / 2.0f;
+        // Soft-key.
+        const midicc::Control& sk = P.soft[i];
+        key(sx + 6, 12, kSW - 12, 22, ctlText(Kind::Soft, sk), ctlDesc(Kind::Soft, sk, "soft-key"),
+            midicc::assigned(sk), reasixty_ccValue(static_cast<int>(Kind::Soft), i) > 0,
+            static_cast<int>(Kind::Soft), i);
+        // V-Pot: drag = turn, click = push.
+        const midicc::Control& vp = P.vpot[i];
+        const midicc::Control& pu = P.push[i];
+        const float vy = 70;
+        const bool vHot = inside(mid - 18, vy - 18, 36, 36);
+        if (vHot && canvasClicked && live) { s_pot = i; s_potY = my; s_potTurned = false; }
+        circle_(c, mid, vy, 18, 0x14181EFF, s_pot == i ? 0xAACCFFFF : vHot ? 0x6688AAFF : 0x4A5060FF);
+        circle_(c, mid, vy, 14, 0x2A3038FF, 0x555A66FF);
+        const int vv = reasixty_ccValue(static_cast<int>(Kind::VPot), i);
+        const int vmax = midicc::maxValue(midicc::hiResActive(Kind::VPot, vp));
+        const float a = vv < 0 ? -2.356f : (static_cast<float>(vv) / vmax * 2.0f - 1.0f) * 2.356f;
+        line_(c, mid + std::sin(a) * 8.0f, vy - std::cos(a) * 8.0f, mid + std::sin(a) * 16.0f, vy - std::cos(a) * 16.0f,
+              midicc::assigned(vp) ? 0xCCCCCCFF : 0x555A66FF, 2.0);
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        drawTextCentered_(c, mid, 100, 0x8890A0FF, ctlText(Kind::VPot, vp).c_str());
+        drawTextCentered_(c, mid, 113, 0xC8B070FF, midicc::valueText(vv, vv >= 0).c_str());
+        ImGui_PopFont(ctx);
+        if (vHot) hoverDesc = ctlDesc(Kind::VPot, vp, "V-Pot (drag up/down)") + "; click = " + ctlDesc(Kind::Push, pu, "push");
+        // SEND/PLUG-IN.
+        const midicc::Control& spc = P.sendPlugin[i];
+        key(sx + 6, 128, kSW - 12, 20, ctlText(Kind::SendPlugin, spc), ctlDesc(Kind::SendPlugin, spc, "SEND/PLUG-IN"),
+            midicc::assigned(spc), reasixty_ccValue(static_cast<int>(Kind::SendPlugin), i) > 0,
+            static_cast<int>(Kind::SendPlugin), i);
+        // Fader.
+        const midicc::Control& fd = P.fader[i];
+        const bool hr = midicc::hiResActive(Kind::Fader, fd);
+        const int fv = reasixty_ccValue(static_cast<int>(Kind::Fader), i);
+        const int pb = s_fader == i ? s_faderPb : (fv < 0 ? 0 : midicc::valueToFader(fv, hr));
+        rect_(c, mid - 1.5f, faderTop, 3, faderBot - faderTop, 0x444B55FF, 0x000000FF, 1.0);
+        const float capY = faderBot - static_cast<float>(pb) / midicc::kFaderPbMax * (faderBot - faderTop);
+        const bool fHot = inside(mid - 14, faderTop - 8, 28, faderBot - faderTop + 16);
+        rect_(c, mid - 12, capY - 6, 24, 12, midicc::assigned(fd) ? (s_fader == i ? 0x88AAEEFF : 0x6A7080FF) : 0x2A2E36FF,
+              0x9CA0AAFF, 2.0);
+        if (fHot && canvasClicked && live && midicc::assigned(fd)) s_fader = i;
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        drawTextCentered_(c, mid, 160, 0x8890A0FF, ctlText(Kind::Fader, fd).c_str());
+        drawTextCentered_(c, mid, 312, 0xC8B070FF, midicc::valueText(fv, fv >= 0).c_str());
+        ImGui_PopFont(ctx);
+        if (fHot) hoverDesc = ctlDesc(Kind::Fader, fd, "fader (drag)");
+    }
+    // Left: page keys, PAGE, foot switches.
+    ImGui_PushFont(ctx, nullptr, 10.0);
+    drawTextCentered_(c, 70, 14, 0x9CA0AAFF, "PAGE");
+    ImGui_PopFont(ctx);
+    for (int p = 0; p < midicc::kPages; ++p) {
+        const float x = 14.0f + (p % 2) * 58.0f, y = 26.0f + (p / 2) * 26.0f;
+        const bool hot = inside(x, y, 54, 22);
+        rect_(c, x, y, 54, 22, p == page ? 0x4477CCFF : hot ? 0x3A4253FF : 0x2C3A2EFF, p == page ? 0xAACCFFFF : 0x6FA86FFF, 3.5);
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        drawTextCentered_(c, x + 27, y + 11, 0xD0D4DAFF, midicc::pageKey(p));
+        ImGui_PopFont(ctx);
+        if (hot) { hoverDesc = std::string("page ") + midicc::pageKey(p); if (canvasClicked && live) reasixty_ccVirtualPage(p); }
+    }
+    for (int d = 0; d < 2; ++d) {
+        const float x = 14.0f + d * 58.0f, y = 106;
+        const bool hot = inside(x, y, 54, 22);
+        rect_(c, x, y, 54, 22, hot ? 0x3A4253FF : 0x2C3A2EFF, 0x6FA86FFF, 3.5);
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        drawTextCentered_(c, x + 27, y + 11, 0xD0D4DAFF, d ? "PAGE \xE2\x96\xB8" : "\xE2\x97\x82 PAGE");
+        ImGui_PopFont(ctx);
+        if (hot) { hoverDesc = d ? "next page" : "previous page"; if (canvasClicked && live) reasixty_ccVirtualPageStep(d ? 1 : -1); }
+    }
+    for (int f = 0; f < midicc::kFeet; ++f) {
+        const midicc::Control& ft = P.foot[f];
+        key(14.0f + f * 58.0f, 270, 54, 22, ctlText(Kind::Foot, ft), ctlDesc(Kind::Foot, ft, f ? "foot 2" : "foot 1"),
+            midicc::assigned(ft), reasixty_ccValue(static_cast<int>(Kind::Foot), f) > 0, static_cast<int>(Kind::Foot), f);
+    }
+    ImGui_PushFont(ctx, nullptr, 10.0);
+    drawTextCentered_(c, 70, 256, 0x9CA0AAFF, "FOOT");
+    ImGui_PopFont(ctx);
+
+    // Drags.
+    if (s_pot >= 0 && canvasActive) {
+        const int det = static_cast<int>((s_potY - my) / 6.0f);
+        if (det != 0) {
+            reasixty_ccVirtualVPot(s_pot, std::clamp(det, -31, 31));
+            s_potY -= det * 6.0f;
+            s_potTurned = true;
+        }
+    }
+    if (s_fader >= 0 && canvasActive) {
+        const float t = std::clamp((faderBot - my) / (faderBot - faderTop), 0.0f, 1.0f);
+        const int pb = static_cast<int>(std::lround(t * midicc::kFaderPbMax));
+        if (pb != s_faderPb) { s_faderPb = pb; reasixty_ccVirtualFader(s_fader, pb); }
+    }
+    if (!canvasActive) {
+        if (s_pot >= 0) {
+            if (!s_potTurned) {   // a click without a turn is the push
+                reasixty_ccVirtualKey(static_cast<int>(Kind::Push), s_pot, true);
+                reasixty_ccVirtualKey(static_cast<int>(Kind::Push), s_pot, false);
+            }
+            s_pot = -1;
+        }
+        s_fader = -1;
+        if (s_keyKind >= 0) {
+            reasixty_ccVirtualKey(s_keyKind, s_keyIdx, false);
+            s_keyKind = s_keyIdx = -1;
+        }
+    }
+    if (!hoverDesc.empty()) ImGui_SetTooltip(ctx, hoverDesc.c_str());
+    ImGui_PopFont(ctx);
 }
 
 // Render the full UC1 schematic. Layout follows the SSL UC1 hardware
@@ -8348,8 +8552,10 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
                 if (uf8::bindings::layerKind(s_editLayer) == uf8::bindings::LayerKind::Uad) {
                     drawUf8UadLayer(ctx, s_editLayer);
                     drawUf8UadVector(ctx);
-                } else
+                } else {
+                    drawUf8CcVirtual(ctx, s_editLayer);
                     drawUf8MidiCcLayer(ctx, s_editLayer, reasixty_ccLivePage());
+                }
             } else {
             drawUf8Vector(ctx, s_selected, s_editQuick, s_editSubBank);
             // Bank-scroll stride: when a selection scrolls past the surface

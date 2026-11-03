@@ -55935,6 +55935,37 @@ void reasixty_setBankFollowsSelection(bool on)
             followSelectedInMixer(tr, /*scrollTcp=*/false, /*moveBank=*/true);
 }
 int  reasixty_ccLivePage()            { return g_ccState.page; }
+// Settings' virtual UF8 on a MIDI CC layer: the events the UF8 itself queues
+// (fader position, V-Pot detents, keys, page), through the same queue and
+// ccApplyInput_, so it tests the real path. Only while a CC layer is active.
+int  reasixty_ccActiveLayer()         { return g_ccIdx; }
+void reasixty_ccVirtualFader(int strip, int pb)
+{
+    queueInput({PendingInput::CcFader, static_cast<uint8_t>(strip), static_cast<double>(pb)});
+}
+void reasixty_ccVirtualVPot(int strip, int detents)
+{
+    queueInput({PendingInput::CcVPot, static_cast<uint8_t>(strip), static_cast<double>(detents)});
+}
+void reasixty_ccVirtualKey(int kind, int idx, bool pressed)
+{
+    queueInput({PendingInput::CcKey, static_cast<uint8_t>((kind << 4) | idx), pressed ? 1.0 : 0.0});
+}
+void reasixty_ccVirtualPage(int page)
+{
+    queueInput({PendingInput::CcPage, 0, static_cast<double>(page)});
+}
+void reasixty_ccVirtualPageStep(int delta)
+{
+    queueInput({PendingInput::CcPage, 1, static_cast<double>(delta)});
+}
+// The value the layer holds for a control on the live page, -1 = not known yet.
+int  reasixty_ccValue(int kind, int idx)
+{
+    const auto k = static_cast<midicc::Kind>(kind);
+    const int p = g_ccState.page;
+    return g_ccState.isKnown(p, k, idx) ? g_ccState.v(p, k, idx) : -1;
+}
 // For Settings: the UAD Console layer's connection and what it found. Here, with
 // the other functions Settings reaches, and NOT up beside uadPaintSurface_: that
 // part of the file sits in an anonymous namespace, and the function was neither
