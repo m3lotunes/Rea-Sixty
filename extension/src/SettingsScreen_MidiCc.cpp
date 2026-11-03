@@ -26,6 +26,15 @@
 int reasixty_ccInputStatus();   // main.cpp: 0 none, 1 open, 2 not found, 3 busy
 uadside::Status reasixty_uadStatus();   // main.cpp: the UAD Console layer's connection
 bool reasixty_drawLedLook(ImGui_Context* ctx, ledlook::Look& l, const char* tag);   // below, shared with the UAD page
+// A section title in the column beside the UF8: a blue caption over a rule.
+void reasixty_section(ImGui_Context* ctx, const char* title)
+{
+    ImGui_Spacing(ctx);
+    ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0x7FA8E0FF);
+    ImGui_Text(ctx, title);
+    ImGui_PopStyleColor(ctx, nullptr);
+    ImGui_Separator(ctx);
+}
 
 namespace {
 
@@ -348,7 +357,6 @@ bool drawExtraEditor_(ImGui_Context* ctx, midicc::Layer& L)
         tip_(ctx, "8 characters, for Settings. Empty = the CC number.");
     }
     if (!enc && midicc::keyHasLamp(s_index)) {
-        ImGui_Spacing(ctx);
         dirty |= reasixty_drawLedLook(ctx, c.led, "ccx");
         hint_(ctx, "Active = value on, Inactive = value off.");
     } else if (!enc) {
@@ -441,7 +449,6 @@ bool drawControlEditor_(ImGui_Context* ctx, midicc::Layer& L, int page)
         ImGui_TextDisabled(ctx, "LED: no lamp on the UF8 for this control.");
         return dirty;
     }
-    ImGui_Spacing(ctx);
     dirty |= reasixty_drawLedLook(ctx, c.led, "ccp");
     hint_(ctx, k == Kind::Fader ? "Shown on SEL and the colour bar (Active colour)."
              : k == Kind::VPot ? "Shown on SEL and the colour bar while FLIP puts the V-Pot on the fader."
@@ -505,7 +512,7 @@ bool reasixty_drawLedLook(ImGui_Context* ctx, ledlook::Look& l, const char* tag)
             if (ImGui_RadioButton(ctx, id, bri == i)) { bri = i; dirty = true; }
         }
     };
-    ImGui_Text(ctx, "LED");
+    reasixty_section(ctx, "LED");
     row("Active", l.activeRgb, l.activeBri, "a");
     row("Inactive", l.inactiveRgb, l.inactiveBri, "i");
     char cb[64];
@@ -581,7 +588,6 @@ void drawUf8UadLayer(ImGui_Context* ctx, int layer)
 {
     (void)layer;
     const uadside::Status st = reasixty_uadStatus();
-    ImGui_Spacing(ctx);
     char line[160];
     if (!st.running)
         snprintf(line, sizeof(line), "UAD Console: starting...");
@@ -626,10 +632,10 @@ int drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test)
     bool dirty = false;
     reasixty_ccEditPageFor(livePage, nullptr);
 
+    reasixty_section(ctx, "PRESET");
     dirty |= drawPresets_(ctx, layer, L);
 
-    ImGui_Text(ctx, "Mode");
-    ImGui_SameLine(ctx, nullptr, nullptr);
+    reasixty_section(ctx, "MODE");
     int mode = s_test ? 1 : 0;
     if (ImGui_RadioButtonEx(ctx, "Edit##cc_mode_e", &mode, 0)) s_test = false;
     tip_(ctx, "A click on the UF8 picks a control for the settings below.");
@@ -659,7 +665,8 @@ int drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test)
                  outs.empty() ? "nothing" : outs.c_str(),
                  L.inputDevice.empty() ? "no device" : L.inputDevice.c_str(),
                  L.followItems ? " + REAPER" : "", L.defaultChannel);
-        if (ImGui_CollapsingHeader(ctx, "Connections###cc_conn", nullptr, nullptr)) {
+        reasixty_section(ctx, "CONNECTIONS");
+        if (ImGui_CollapsingHeader(ctx, "Outputs, input, channel###cc_conn", nullptr, nullptr)) {
             dirty |= drawConnections_(ctx, layer, L);
             ImGui_Spacing(ctx);
         } else {
@@ -668,9 +675,9 @@ int drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test)
     }
 
     // Page tabs = the soft-key bank keys; the one the UF8 is on is marked.
-    ImGui_Text(ctx, "Page");
+    reasixty_section(ctx, "PAGE");
     for (int p = 0; p < midicc::kPages; ++p) {
-        ImGui_SameLine(ctx, nullptr, nullptr);
+        if (p) ImGui_SameLine(ctx, nullptr, nullptr);
         std::string lbl = midicc::pageKey(p);
         if (p == livePage && layer == bnd::ccLayerActiveIndex()) lbl = "*" + lbl;
         lbl += "##cc_tab_" + std::to_string(p);
@@ -686,7 +693,7 @@ int drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test)
         }
     }
     ImGui_AlignTextToFramePadding(ctx);
-    ImGui_Text(ctx, "Page name");
+    ImGui_Text(ctx, "Name");
     ImGui_SameLine(ctx, nullptr, nullptr);
     {
         char buf[32];

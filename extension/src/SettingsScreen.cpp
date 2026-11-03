@@ -478,6 +478,7 @@ void reasixty_ccVirtualPageStep(int delta);
 int  reasixty_ccValue(int kind, int idx);
 void reasixty_ccSelect(int kind, int index);
 bool reasixty_drawLedLook(ImGui_Context* ctx, ledlook::Look& l, const char* tag);
+void reasixty_section(ImGui_Context* ctx, const char* title);
 bool reasixty_ccIsSelected(int kind, int index);
 void reasixty_ccVirtualExtraKey(int id, bool pressed);
 void reasixty_ccVirtualEncoder(int detents);
@@ -2906,9 +2907,8 @@ void drawUf8UadControls(ImGui_Context* ctx)
     if (!st.online && !offTest) { ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF); ++pushed; }
     ImGui_TextWrapped(ctx, line);
     if (pushed) ImGui_PopStyleColor(ctx, &pushed);
+    reasixty_section(ctx, "MODE");
     int m = s_uadLedMode ? 1 : 0;
-    ImGui_Text(ctx, "Mode");
-    ImGui_SameLine(ctx, nullptr, nullptr);
     if (ImGui_RadioButtonEx(ctx, "Use##uad_mode_use", &m, 0)) s_uadLedMode = false;
     ImGui_SameLine(ctx, nullptr, nullptr);
     if (ImGui_RadioButtonEx(ctx, "Edit LEDs##uad_mode_col", &m, 1)) s_uadLedMode = true;
@@ -2926,6 +2926,7 @@ void drawUf8UadInspector(ImGui_Context* ctx)
 {
     const int layer = uadSettingsLayer_();
     if (!s_uadLedMode) return;
+    reasixty_section(ctx, "KEY");
     if (layer < 0 || s_uadLedKey < 0) {
         ImGui_Text(ctx, "Click a key on the UF8.");
         return;
@@ -8846,9 +8847,9 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
                     // A narrow column: texts wrap at 340 px from where it starts.
                     double wrapX = ImGui_GetCursorPosX(ctx) + 340.0;
                     ImGui_PushTextWrapPos(ctx, &wrapX);
+                    reasixty_section(ctx, "CONNECTION");
                     drawUf8UadLayer(ctx, s_editLayer);
                     drawUf8UadControls(ctx);
-                    ImGui_Separator(ctx);
                     drawUf8UadInspector(ctx);
                     ImGui_PopTextWrapPos(ctx);
                     ImGui_EndGroup(ctx);
@@ -8871,7 +8872,7 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
                     double wrapX = ImGui_GetCursorPosX(ctx) + 340.0;
                     ImGui_PushTextWrapPos(ctx, &wrapX);
                     drawUf8CcHeader(ctx, s_editLayer, reasixty_ccLivePage(), &test);
-                    ImGui_Separator(ctx);
+                    reasixty_section(ctx, "CONTROL");
                     drawUf8CcInspector(ctx, s_editLayer, pg);
                     ImGui_PopTextWrapPos(ctx);
                     ImGui_EndGroup(ctx);
