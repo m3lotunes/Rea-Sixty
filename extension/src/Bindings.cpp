@@ -2092,6 +2092,11 @@ void serializeCcLayer_(const midicc::Layer& L, std::ostringstream& os, const cha
     for (int p = 0; p < midicc::kPages; ++p) {
         if (p) os << ",";
         os << "\n" << pad << "  {";
+        if (!L.pages[p].name.empty()) {
+            os << "\"name\": ";
+            appendEscaped(os, L.pages[p].name);
+            os << ",";
+        }
         for (int k = 0; k < midicc::kKindCount; ++k) {
             const auto kind = static_cast<midicc::Kind>(k);
             if (k) os << ",";
@@ -3227,6 +3232,8 @@ void parseCcLayer_(wdl_json_element* o, midicc::Layer& out)
     for (int p = 0; p < pages->m_array->GetSize() && p + shift < midicc::kPages; ++p) {
         wdl_json_element* po = pages->enum_item(p);
         if (!po || !po->is_object()) continue;
+        if (auto* v = po->get_item_by_name("name"))
+            if (auto* t = v->get_string_value()) out.pages[p + shift].name = t;
         for (int k = 0; k < midicc::kKindCount; ++k) {
             const auto kind = static_cast<midicc::Kind>(k);
             auto* arr = po->get_item_by_name(kCcKindKeys_[k]);

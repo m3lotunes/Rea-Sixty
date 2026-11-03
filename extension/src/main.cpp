@@ -23160,6 +23160,38 @@ static midicc::State    g_ccState;
 // active CC layer: the USB thread reads these to decide what is the layer's.
 static std::array<std::atomic<bool>, 128> g_ccKeyAssigned{};
 static std::atomic<bool> g_ccEncAssigned{false};
+// The global lamp of a key the CC layer can give a colour (midicc::keyHasLamp).
+static bool ccLedOfKey_(int id, uf8::Uf8GlobalLed& out)
+{
+    using G = uf8::Uf8GlobalLed;
+    switch (id) {
+        case 0x43: out = G::Quick1; return true;   case 0x44: out = G::Quick2; return true;
+        case 0x45: out = G::Quick3; return true;   case 0x50: out = G::Plugin; return true;
+        case 0x51: out = G::Channel; return true;  case 0x54: out = G::Flip; return true;
+        case 0x58: out = G::AutoOff; return true;  case 0x59: out = G::AutoRead; return true;
+        case 0x5A: out = G::AutoWrite; return true; case 0x5B: out = G::AutoTrim; return true;
+        case 0x5C: out = G::AutoLatch; return true; case 0x5D: out = G::AutoTouch; return true;
+        case 0x6E: out = G::Pan; return true;      case 0x6F: out = G::Fine; return true;
+        case 0x70: out = G::Norm; return true;     case 0x71: out = G::Rec; return true;
+        case 0x72: out = G::Auto; return true;     case 0x73: out = G::Nav; return true;
+        case 0x74: out = G::Nudge; return true;    case 0x75: out = G::Focus; return true;
+        case 0x78: out = G::BankLeft; return true; case 0x79: out = G::BankRight; return true;
+        case 0x7A: out = G::ZoomUp; return true;   case 0x7B: out = G::ZoomLeft; return true;
+        case 0x7C: out = G::ZoomCenter; return true; case 0x7D: out = G::ZoomRight; return true;
+        case 0x7E: out = G::ZoomDown; return true;
+        default: return false;
+    }
+}
+// Whether the CC layer paints this lamp itself (its key carries a CC).
+static bool ccOwnsLed_(uf8::Uf8GlobalLed cell)
+{
+    if (!uf8::bindings::ccLayerActive()) return false;
+    for (int id = 0x40; id < 0x80; ++id) {
+        uf8::Uf8GlobalLed c;
+        if (ccLedOfKey_(id, c) && c == cell) return g_ccKeyAssigned[static_cast<std::size_t>(id)].load();
+    }
+    return false;
+}
 static void ccPublishAssigned_(const midicc::Layer* L)
 {
     for (int id = 0; id < 128; ++id) {
@@ -45741,6 +45773,7 @@ void invalidateGlobalLedCell_(uf8::Uf8GlobalLed cell)
 
 void sendUf8GlobalLed(uf8::Uf8GlobalLed cell, uf8::GlobalLedState callerState)
 {
+    if (ccOwnsLed_(cell)) return;      // the CC layer's own colour (pushUf8GlobalLeds, end)
     const bool callerActive = (callerState == uf8::GlobalLedState::Bright);
     const auto mod = liveModifierForLed_();
     const bool armed = (mod != uf8::bindings::Modifier::Plain) &&
@@ -46469,6 +46502,18 @@ void pushUf8GlobalLeds()
             sLastFocus = focusOn;
         }
         g_lastEncoderMode = encMode;
+    }
+
+    // MIDI CC layer: the keys with their own CC light in their colour, bright
+    // while their value is on.
+    if (g_ccIdx >= 0) {
+        for (const auto& [id, c] : g_ccLayer.keys) {
+            uf8::Uf8GlobalLed cell;
+            if (!midicc::assigned(c) || !ccLedOfKey_(id, cell)) continue;
+            const uf8::LedColour col = uf8::ledColourForTrackRgb(midicc::colourRgb(c));
+            sendUf8GlobalLedDirect_(cell, g_ccState.keyLit(id) ? uf8::GlobalLedState::Bright
+                                                               : uf8::GlobalLedState::Dim, &col);
+        }
     }
 
     g_globalLedsInit = true;
@@ -56011,6 +56056,12 @@ int  reasixty_ccKeyValue(int id)
 }
 int  reasixty_ccEncoderValue() { return g_ccState.encKnown ? g_ccState.encValue : -1; }
 // The value the layer holds for a control on the live page, -1 = not known yet.
+int  reasixty_ccValueOn(int page, int kind, int idx)
+{
+    if (page < 0 || page >= midicc::kPages) return -1;
+    const auto k = static_cast<midicc::Kind>(kind);
+    return g_ccState.isKnown(page, k, idx) ? g_ccState.v(page, k, idx) : -1;
+}
 int  reasixty_ccValue(int kind, int idx)
 {
     const auto k = static_cast<midicc::Kind>(kind);

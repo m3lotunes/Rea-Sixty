@@ -93,11 +93,11 @@ void setOutput_(midicc::Layer& L, const std::string& name, bool on)
 }
 
 // The layer block: where the MIDI goes, where it comes back from, presets.
-bool drawLayerBlock_(ImGui_Context* ctx, int layer, midicc::Layer& L)
+bool drawConnections_(ImGui_Context* ctx, int layer, midicc::Layer& L)
 {
     bool dirty = false;
 
-    ImGui_Text(ctx, "Output");
+    ImGui_Text(ctx, "Send to");
     ImGui_SameLine(ctx, nullptr, nullptr);
     {
         bool v = hasOutput_(L, "");
@@ -126,7 +126,7 @@ bool drawLayerBlock_(ImGui_Context* ctx, int layer, midicc::Layer& L)
         if (ImGui_Checkbox(ctx, id, &v) && !v) { setOutput_(L, o, false); dirty = true; break; }
     }
 
-    ImGui_Text(ctx, "Input");
+    ImGui_Text(ctx, "Values from device");
     ImGui_SameLine(ctx, nullptr, nullptr);
     ImGui_SetNextItemWidth(ctx, 260.0);
     {
@@ -164,7 +164,7 @@ bool drawLayerBlock_(ImGui_Context* ctx, int layer, midicc::Layer& L)
 
     {
         bool v = L.followItems;
-        if (ImGui_Checkbox(ctx, "Follow CC in REAPER##cc_follow", &v)) {
+        if (ImGui_Checkbox(ctx, "Values from REAPER: follow the CC lanes of the selected track##cc_follow", &v)) {
             L.followItems = v;
             dirty = true;
         }
@@ -180,12 +180,18 @@ bool drawLayerBlock_(ImGui_Context* ctx, int layer, midicc::Layer& L)
             L.defaultChannel = std::clamp(ch, 1, 16);
             dirty = true;
         }
+        tip_(ctx, "Every control sends on this channel unless it has its own.");
     }
+    return dirty;
+}
 
-    // Presets.
+// Preset row: one place for CC sets (load, save, save as, delete, factory).
+bool drawPresets_(ImGui_Context* ctx, int layer, midicc::Layer& L)
+{
+    bool dirty = false;
     const std::vector<std::string> names = bnd::ccPresetNames();
     if (s_presetSel >= static_cast<int>(names.size())) s_presetSel = -1;
-    ImGui_Text(ctx, "CC preset");
+    ImGui_Text(ctx, "Preset");
     ImGui_SameLine(ctx, nullptr, nullptr);
     ImGui_SetNextItemWidth(ctx, 200.0);
     if (ImGui_BeginCombo(ctx, "##cc_preset",
@@ -221,7 +227,7 @@ bool drawLayerBlock_(ImGui_Context* ctx, int layer, midicc::Layer& L)
         }
     }
     ImGui_SameLine(ctx, nullptr, nullptr);
-    if (ImGui_Button(ctx, "Default##cc_pre_default", nullptr, nullptr)) {
+    if (ImGui_Button(ctx, "Factory##cc_pre_default", nullptr, nullptr)) {
         midicc::Layer f = midicc::factoryLayer();
         f.outputs = L.outputs;             // where the MIDI goes is not a CC set
         f.inputDevice = L.inputDevice;
@@ -257,29 +263,45 @@ bool drawLayerBlock_(ImGui_Context* ctx, int layer, midicc::Layer& L)
     return dirty;
 }
 
-// One grid cell: the control's name on its colour, outlined when selected.
-void drawCell_(ImGui_Context* ctx, const midicc::Control& c, Kind k, int i, int page)
+
+// Channel: the layer's default, or its own (Novation's "Default Channel" pattern).
+bool channelRow_(ImGui_Context* ctx, midicc::Control& c, int defaultChannel)
 {
-    const bool selected = (s_kind == static_cast<int>(k) && s_index == i);
-    const bool on = midicc::assigned(c);
-    std::string label = midicc::displayName(k, c);
-    if (label.empty()) label = "-";
-    char id[64];
-    snprintf(id, sizeof(id), "%s##cc_cell_%d_%d_%d", label.c_str(), page, int(k), i);
-    int pushed = 0;
-    if (selected) {
-        ImGui_PushStyleColor(ctx, ImGui_Col_Button, 0x4477CCFF);
-        ++pushed;
-    } else if (on && midicc::hasColour(k)) {
-        ImGui_PushStyleColor(ctx, ImGui_Col_Button, rgba_(midicc::colourRgb(c), 0x55));
-        ++pushed;
+    bool dirty = false;
+    ImGui_Text(ctx, "Channel");
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    char dl[48];
+    snprintf(dl, sizeof(dl), "Default (%d)##cc_ch_def", defaultChannel);
+    int own = c.channel >= 1 ? 1 : 0;
+    if (ImGui_RadioButtonEx(ctx, dl, &own, 0)) { c.channel = 0; dirty = true; }
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    if (ImGui_RadioButtonEx(ctx, "Own##cc_ch_own", &own, 1) && c.channel < 1) { c.channel = defaultChannel; dirty = true; }
+    if (c.channel >= 1) {
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        ImGui_SetNextItemWidth(ctx, 100.0);
+        int ch = c.channel;
+        if (ImGui_InputInt(ctx, "##cc_ch_own_n", &ch, nullptr, nullptr, nullptr)) { c.channel = std::clamp(ch, 1, 16); dirty = true; }
     }
-    double bw = 74.0, bh = 22.0;
-    if (ImGui_Button(ctx, id, &bw, &bh)) {
-        s_kind = static_cast<int>(k);
-        s_index = i;
+    return dirty;
+}
+
+bool colourRow_(ImGui_Context* ctx, midicc::Control& c, const char* where)
+{
+    bool dirty = false;
+    ImGui_Text(ctx, "Colour");
+    tip_(ctx, where);
+    for (int i = 0; i < midicc::kColourCount; ++i) {
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        char id[32];
+        snprintf(id, sizeof(id), "##cc_col_%d", i);
+        int flags = 0;
+        double w = (i == c.colour) ? 30.0 : 22.0, h = w;
+        if (ImGui_ColorButton(ctx, id, rgba_(midicc::kColours[i], 0xFF), &flags, &w, &h)) {
+            c.colour = i;
+            dirty = true;
+        }
     }
-    if (pushed) ImGui_PopStyleColor(ctx, &pushed);
+    return dirty;
 }
 
 // The editor of one of the other keys (s_kind 100, s_index = UF8 id) or the
@@ -295,14 +317,7 @@ bool drawExtraEditor_(ImGui_Context* ctx, midicc::Layer& L)
     ImGui_Text(ctx, hdr);
     ImGui_TextDisabled(ctx, enc ? "Without a CC the encoder keeps its normal job on this layer."
                                 : "Without a CC (-1) the key keeps its normal job on this layer.");
-    ImGui_Text(ctx, "Channel");
-    ImGui_SameLine(ctx, nullptr, nullptr);
-    ImGui_SetNextItemWidth(ctx, 110.0);
-    {
-        int ch = c.channel;
-        if (ImGui_InputInt(ctx, "##cc_x_ch", &ch, nullptr, nullptr, nullptr)) { c.channel = std::clamp(ch, 0, 16); dirty = true; }
-        tip_(ctx, "0 = the layer's default channel.");
-    }
+    dirty |= channelRow_(ctx, c, L.defaultChannel);
     ImGui_Text(ctx, "CC number");
     ImGui_SameLine(ctx, nullptr, nullptr);
     ImGui_SetNextItemWidth(ctx, 110.0);
@@ -335,6 +350,10 @@ bool drawExtraEditor_(ImGui_Context* ctx, midicc::Layer& L)
         ImGui_PopItemWidth(ctx);
         tip_(ctx, "8 characters, for Settings. Empty = the CC number.");
     }
+    if (!enc && midicc::keyHasLamp(s_index))
+        dirty |= colourRow_(ctx, c, "The key's lamp, bright while its value is on.");
+    else if (!enc)
+        ImGui_TextDisabled(ctx, "Colour: this key's lamp has a fixed colour.");
     if (!enc && !midicc::assigned(c) && c.name.empty()) L.keys.erase(s_index);
     return dirty;
 }
@@ -349,20 +368,11 @@ bool drawControlEditor_(ImGui_Context* ctx, midicc::Layer& L, int page)
     midicc::Control& c = L.pages[page].at(k, s_index);
 
     char hdr[96];
-    snprintf(hdr, sizeof(hdr), "%s %d, page %s", kindName_(k), s_index + 1, midicc::pageKey(page));
+    snprintf(hdr, sizeof(hdr), "%s %d  -  page %s%s%s", kindName_(k), s_index + 1, midicc::pageKey(page),
+             L.pages[page].name.empty() ? "" : " ", L.pages[page].name.c_str());
     ImGui_Text(ctx, hdr);
 
-    ImGui_Text(ctx, "Channel");
-    ImGui_SameLine(ctx, nullptr, nullptr);
-    ImGui_SetNextItemWidth(ctx, 110.0);
-    {
-        int ch = c.channel;
-        if (ImGui_InputInt(ctx, "##cc_ed_ch", &ch, nullptr, nullptr, nullptr)) {
-            c.channel = std::clamp(ch, 0, 16);
-            dirty = true;
-        }
-        tip_(ctx, "0 = the layer's default channel.");
-    }
+    dirty |= channelRow_(ctx, c, L.defaultChannel);
 
     ImGui_Text(ctx, k == Kind::SendPlugin ? "Program" : "CC number");
     ImGui_SameLine(ctx, nullptr, nullptr);
@@ -426,20 +436,13 @@ bool drawControlEditor_(ImGui_Context* ctx, midicc::Layer& L, int page)
     }
 
     // Only where the UF8 has a lamp for it (midicc::hasColour).
-    if (!midicc::hasColour(k)) return dirty;
-    ImGui_Text(ctx, "Colour");
-    if (k == Kind::VPot) tip_(ctx, "Shown on SEL and the colour bar while FLIP puts the V-Pot on the fader.");
-    for (int i = 0; i < midicc::kColourCount; ++i) {
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        char id[32];
-        snprintf(id, sizeof(id), "##cc_col_%d", i);
-        int flags = 0;
-        double w = (i == c.colour) ? 30.0 : 22.0, h = w;
-        if (ImGui_ColorButton(ctx, id, rgba_(midicc::kColours[i], 0xFF), &flags, &w, &h)) {
-            c.colour = i;
-            dirty = true;
-        }
+    if (!midicc::hasColour(k)) {
+        ImGui_TextDisabled(ctx, "Colour: no lamp on the UF8 for this control.");
+        return dirty;
     }
+    dirty |= colourRow_(ctx, c, k == Kind::Fader ? "On SEL and the colour bar."
+                              : k == Kind::VPot ? "On SEL and the colour bar while FLIP puts the V-Pot on the fader."
+                                                : "The key's lamp, bright while its value is on.");
     return dirty;
 }
 
@@ -536,71 +539,84 @@ void drawUf8UadLayer(ImGui_Context* ctx, int layer)
     // drawUf8UadVector).
 }
 
-// The CC layer's editor, in place of the schematic.
-void drawUf8MidiCcLayer(ImGui_Context* ctx, int layer, int livePage)
+// The CC layer's page in Settings, top to bottom (redesign 03.11.2026, after
+// SSL 360, Novation Components, Electra One, Grid Editor):
+//   drawUf8CcHeader     preset row, mode (Edit / Test), connections (folded,
+//                       with a one-line summary), page tabs with names
+//   drawUf8CcVirtual    the UF8 picture (SettingsScreen.cpp): the only way to
+//                       pick a control
+//   drawUf8CcInspector  the picked control, beside the picture when there is room
+namespace { int s_editPage = 0; int s_lastLive = -1; bool s_test = false; }
+
+void reasixty_ccSetEditPage(int p) { s_editPage = std::clamp(p, 0, midicc::kPages - 1); }
+
+int drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test)
 {
     midicc::Layer L = bnd::ccLayer(layer);
     bool dirty = false;
+    // The page the UF8 is on, unless a tab here picks another one.
+    if (livePage != s_lastLive) { s_editPage = livePage; s_lastLive = livePage; }
+    s_editPage = std::clamp(s_editPage, 0, midicc::kPages - 1);
 
     ImGui_Spacing(ctx);
-    dirty |= drawLayerBlock_(ctx, layer, L);
-    ImGui_Spacing(ctx);
-    ImGui_Separator(ctx);
-    ImGui_Spacing(ctx);
+    dirty |= drawPresets_(ctx, layer, L);
 
-    // The page the UF8 is on, unless the user clicks another one here.
-    static int s_page = 0;
-    static int s_lastLive = -1;
-    if (livePage != s_lastLive) { s_page = livePage; s_lastLive = livePage; }
-    s_page = std::clamp(s_page, 0, midicc::kPages - 1);
+    ImGui_Text(ctx, "Mode");
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    int mode = s_test ? 1 : 0;
+    if (ImGui_RadioButtonEx(ctx, "Edit: click a control to set it up##cc_mode_e", &mode, 0)) s_test = false;
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    if (ImGui_RadioButtonEx(ctx, "Test: clicks and drags send MIDI##cc_mode_t", &mode, 1)) s_test = true;
+    *test = s_test;
+
+    // Connections: set once, folded away, summarised in the header.
+    {
+        std::string outs;
+        for (const auto& o : L.outputs) outs += (outs.empty() ? "" : ", ") + (o.empty() ? std::string("REAPER") : o);
+        char hdr[512];
+        snprintf(hdr, sizeof(hdr), "Connections:  to %s  |  values from %s%s  |  default channel %d###cc_conn",
+                 outs.empty() ? "nothing" : outs.c_str(),
+                 L.inputDevice.empty() ? "no device" : L.inputDevice.c_str(),
+                 L.followItems ? " + REAPER" : "", L.defaultChannel);
+        if (ImGui_CollapsingHeader(ctx, hdr, nullptr, nullptr)) {
+            dirty |= drawConnections_(ctx, layer, L);
+            ImGui_Spacing(ctx);
+        }
+    }
+
+    // Page tabs = the soft-key bank keys; the one the UF8 is on is marked.
     ImGui_Text(ctx, "Page");
     for (int p = 0; p < midicc::kPages; ++p) {
         ImGui_SameLine(ctx, nullptr, nullptr);
-        char id[24];
-        snprintf(id, sizeof(id), " %s ##cc_page_%d", midicc::pageKey(p), p);
+        std::string lbl = midicc::pageKey(p);
+        if (!L.pages[p].name.empty()) lbl += " " + L.pages[p].name;
+        if (p == livePage && layer == bnd::ccLayerActiveIndex()) lbl += " (UF8)";
+        lbl += "##cc_tab_" + std::to_string(p);
         int pushed = 0;
-        if (p == s_page) { ImGui_PushStyleColor(ctx, ImGui_Col_Button, 0x4477CCFF); ++pushed; }
-        if (ImGui_Button(ctx, id, nullptr, nullptr)) s_page = p;
+        if (p == s_editPage) { ImGui_PushStyleColor(ctx, ImGui_Col_Button, 0x4477CCFF); ++pushed; }
+        if (ImGui_Button(ctx, lbl.c_str(), nullptr, nullptr)) s_editPage = p;
         if (pushed) ImGui_PopStyleColor(ctx, &pushed);
     }
     ImGui_SameLine(ctx, nullptr, nullptr);
-    ImGui_TextDisabled(ctx, "   on the UF8: soft-key bank keys V-POT and 1 to 5, PAGE < >");
-
-    ImGui_Spacing(ctx);
-    const midicc::Page& P = L.pages[s_page];
-    struct Row { const char* name; Kind k; };
-    const Row rows[] = {
-        {"Soft-key",     Kind::Soft},
-        {"V-Pot",        Kind::VPot},
-        {"V-Pot push",   Kind::Push},
-        {"Send/plug-in", Kind::SendPlugin},
-        {"Fader",        Kind::Fader},
-    };
-    // Fixed column for the cells, so the rows line up whatever the label width.
-    double cellX = 110.0;
-    for (const Row& r : rows) {
-        ImGui_Text(ctx, r.name);
-        for (int i = 0; i < midicc::kStrips; ++i) {
-            if (i == 0) ImGui_SameLine(ctx, &cellX, nullptr);
-            else        ImGui_SameLine(ctx, nullptr, nullptr);
-            drawCell_(ctx, P.at(r.k, i), r.k, i, s_page);
-        }
+    ImGui_Text(ctx, "  Name");
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%s", L.pages[s_editPage].name.c_str());
+        int flags = 0;
+        ImGui_PushItemWidth(ctx, 140);
+        if (ImGui_InputText(ctx, "##cc_page_name", buf, 17, &flags, nullptr)) { L.pages[s_editPage].name = buf; dirty = true; }
+        ImGui_PopItemWidth(ctx);
+        tip_(ctx, "A name for this page, e.g. 'Strings'. Settings only.");
     }
-    ImGui_Text(ctx, "Foot");
-    for (int i = 0; i < midicc::kFeet; ++i) {
-        if (i == 0) ImGui_SameLine(ctx, &cellX, nullptr);
-        else        ImGui_SameLine(ctx, nullptr, nullptr);
-        drawCell_(ctx, P.foot[i], Kind::Foot, i, s_page);
-    }
-    ImGui_TextDisabled(ctx,
-        "FINE, the channel encoder and its keys, the zoom pad, the automation row, FLIP,\n"
-        "the layer keys and 360 work as on Layer 1. SOLO, CUT, SEL, BANK, Quick and the\n"
-        "other keys have no function on this layer.");
-
-    ImGui_Spacing(ctx);
-    ImGui_Separator(ctx);
-    ImGui_Spacing(ctx);
-    dirty |= drawControlEditor_(ctx, L, s_page);
-
+    ImGui_TextDisabled(ctx, "Green: sends a CC.  Dim: no CC, the key keeps its normal job.  Grey: fixed (layers, 360, pages).  "
+                            "Soft-keys, V-Pots, pushes, SEND/PLUG-IN, faders and feet are per page; every other key and the encoder are the same on all pages.");
     if (dirty) bnd::setCcLayer(layer, L);
+    return s_editPage;
+}
+
+void drawUf8CcInspector(ImGui_Context* ctx, int layer, int page)
+{
+    midicc::Layer L = bnd::ccLayer(layer);
+    if (drawControlEditor_(ctx, L, page)) bnd::setCcLayer(layer, L);
 }

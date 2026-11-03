@@ -85,6 +85,7 @@ struct Control {
 };
 
 struct Page {
+    std::string name;          // shown in Settings beside the page key, "" = none
     Control fader[kStrips], vpot[kStrips], push[kStrips], soft[kStrips],
             sendPlugin[kStrips], foot[kFeet];
 
@@ -121,6 +122,15 @@ inline bool keyAssignable(int id)
     if (id >= 0x68 && id <= 0x6D) return false;                  // V-POT, 1..5
     if (id == 0x52 || id == 0x53) return false;                  // PAGE < >
     return true;
+}
+
+// Whether the key has its own RGB lamp on the UF8 (so its Control::colour shows).
+// SOLO / CUT / SEL have fixed lamp colours, ENC PUSH has none.
+inline bool keyHasLamp(int id)
+{
+    return (id >= 0x43 && id <= 0x45) || id == 0x50 || id == 0x51 || id == 0x54
+        || (id >= 0x58 && id <= 0x5D) || (id >= 0x6E && id <= 0x75)
+        || id == 0x78 || id == 0x79 || (id >= 0x7A && id <= 0x7E);
 }
 
 // The name of a key for Settings (keyAssignable ids, and the ones it refuses).

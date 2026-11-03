@@ -62,6 +62,7 @@ int main()
     cc.keys[0x79].number = 81;
     cc.keys[0x51].number = -1;                           // unassigned: not written
     cc.encoder.number = 90; cc.encoder.channel = 3;
+    cc.pages[2].name = "Strings";
     bnd::setCcLayer(1, cc);
 
     // Not on it yet.
@@ -94,6 +95,7 @@ int main()
            && r.keys.at(0x20).name == "Solo1");
     EXPECT(r.keys.at(0x79).number == 81);
     EXPECT(r.encoder.number == 90 && r.encoder.channel == 3);
+    EXPECT(r.pages[2].name == "Strings" && r.pages[1].name.empty());
     EXPECT(!midicc::keyAssignable(0x40) && !midicc::keyAssignable(0x46) && !midicc::keyAssignable(0x68)
            && !midicc::keyAssignable(0x18) && midicc::keyAssignable(0x22) && midicc::keyAssignable(0x76));
 

@@ -464,7 +464,10 @@ void reasixty_setBankFollowsSelection(bool on);
 int  reasixty_ccLivePage();          // MIDI CC layer: the page the UF8 is on
 // SettingsScreen_MidiCc.cpp
 bool drawUf8LayerKindRow(ImGui_Context* ctx, int layer);
-void drawUf8MidiCcLayer(ImGui_Context* ctx, int layer, int livePage);
+int  drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test);
+void drawUf8CcInspector(ImGui_Context* ctx, int layer, int page);
+void reasixty_ccSetEditPage(int p);
+int  reasixty_ccValueOn(int page, int kind, int idx);
 int  reasixty_ccActiveLayer();
 void reasixty_ccVirtualFader(int strip, int pb);
 void reasixty_ccVirtualVPot(int strip, int detents);
@@ -2847,19 +2850,22 @@ void drawUf8UadVector(ImGui_Context* ctx)
 // Per page: soft-keys, V-Pots, V-Pot pushes, SEND/PLUG-IN, faders, feet. On all
 // pages: every other key (midicc::keyAssignable) and the channel encoder.
 // LAYER 1..3, 360 and the page keys keep their job and cannot be assigned.
-void drawUf8CcVirtual(ImGui_Context* ctx, int layer)
+void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode)
 {
     namespace bnd = uf8::bindings;
     using midicc::Kind;
     const midicc::Layer L = bnd::ccLayer(layer);
     const bool live = reasixty_ccActiveLayer() == layer;
-    const int page = std::clamp(reasixty_ccLivePage(), 0, midicc::kPages - 1);
+    const int page = std::clamp(editPage, 0, midicc::kPages - 1);
     const midicc::Page& P = L.pages[static_cast<std::size_t>(page)];
     constexpr int kSelKey = 100, kSelEnc = 101;
+    const bool s_test = testMode;
+    // Testing a page sends on it: the layer goes to the page shown here.
+    if (s_test && live && reasixty_ccLivePage() != page) reasixty_ccVirtualPage(page);
+    // Values are the layer's on the page shown (unknown on other pages).
+    auto reasixty_ccValue = [&](int kind, int idx) { return reasixty_ccValueOn(page, kind, idx); };
 
-    static bool s_test = false;
     ImGui_Spacing(ctx);
-    ImGui_Checkbox(ctx, "Test: clicks on the UF8 below send (otherwise a click picks the control to edit)", &s_test);
     if (s_test && !live) {
         ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF);
         ImGui_Text(ctx, "This layer is not the active one, so nothing is sent.");
@@ -3037,12 +3043,12 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer)
         const bool hot = tileDraw(x, y, 54, 20, midicc::pageKey(p), true, true, p == page, false);
         if (hot) {
             hoverDesc = std::string("page ") + midicc::pageKey(p) + " (the soft-key bank key; keeps its job)";
-            if (canvasClicked && live) reasixty_ccVirtualPage(p);
+            if (canvasClicked) reasixty_ccSetEditPage(p);
         }
     }
     for (int d = 0; d < 2; ++d) {
         const bool hot = tileDraw(14.0f + d * 56.0f, 202, 54, 20, d ? "PAGE \xE2\x96\xB8" : "\xE2\x97\x82 PAGE", true, true, false, false);
-        if (hot) { hoverDesc = d ? "next page" : "previous page"; if (canvasClicked && live) reasixty_ccVirtualPageStep(d ? 1 : -1); }
+        if (hot) { hoverDesc = d ? "next page" : "previous page"; if (canvasClicked) reasixty_ccSetEditPage(page + (d ? 1 : -1)); }
     }
     anyKey(14, 230, 54, 20, 0x50, "PLUGIN");
     anyKey(70, 230, 54, 20, 0x51, "CHANNEL");
@@ -3098,7 +3104,7 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer)
     label(918, 300, "BANK");
     anyKey(866, 310, 48, 22, 0x78, "\xE2\x97\x82");
     anyKey(922, 310, 48, 22, 0x79, "\xE2\x96\xB8");
-    label(918, 352, s_test ? (live ? "TEST: clicks send" : "TEST: layer not active") : "ASSIGN: click a control");
+    label(918, 352, s_test ? (live ? "TEST: clicks send" : "TEST: layer not active") : "EDIT: click a control");
 
     // ---- drags and releases (test mode) ----
     if (s_pot >= 0 && canvasActive) {
@@ -8659,8 +8665,20 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
                     drawUf8UadLayer(ctx, s_editLayer);
                     drawUf8UadVector(ctx);
                 } else {
-                    drawUf8CcVirtual(ctx, s_editLayer);
-                    drawUf8MidiCcLayer(ctx, s_editLayer, reasixty_ccLivePage());
+                    // Header, then the UF8 with the picked control beside it
+                    // (below it when the window is too narrow).
+                    bool test = false;
+                    const int pg = drawUf8CcHeader(ctx, s_editLayer, reasixty_ccLivePage(), &test);
+                    double availW = 0, availH = 0;
+                    ImGui_GetContentRegionAvail(ctx, &availW, &availH);
+                    ImGui_BeginGroup(ctx);
+                    drawUf8CcVirtual(ctx, s_editLayer, pg, test);
+                    ImGui_EndGroup(ctx);
+                    if (availW >= 1000.0 + 320.0) ImGui_SameLine(ctx, nullptr, nullptr);
+                    else ImGui_Separator(ctx);
+                    ImGui_BeginGroup(ctx);
+                    drawUf8CcInspector(ctx, s_editLayer, pg);
+                    ImGui_EndGroup(ctx);
                 }
             } else {
             drawUf8Vector(ctx, s_selected, s_editQuick, s_editSubBank);
