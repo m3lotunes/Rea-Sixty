@@ -465,6 +465,7 @@ int  reasixty_ccLivePage();          // MIDI CC layer: the page the UF8 is on
 // SettingsScreen_MidiCc.cpp
 bool drawUf8LayerKindRow(ImGui_Context* ctx, int layer);
 int  drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test);
+int  reasixty_ccEditPageFor(int livePage, bool* test);
 void drawUf8CcInspector(ImGui_Context* ctx, int layer, int page);
 void reasixty_ccSetEditPage(int p);
 int  reasixty_ccValueOn(int page, int kind, int idx);
@@ -476,6 +477,7 @@ void reasixty_ccVirtualPage(int page);
 void reasixty_ccVirtualPageStep(int delta);
 int  reasixty_ccValue(int kind, int idx);
 void reasixty_ccSelect(int kind, int index);
+bool reasixty_drawLedLook(ImGui_Context* ctx, ledlook::Look& l, const char* tag);
 bool reasixty_ccIsSelected(int kind, int index);
 void reasixty_ccVirtualExtraKey(int id, bool pressed);
 void reasixty_ccVirtualEncoder(int detents);
@@ -2242,6 +2244,21 @@ void drawUf8Vector(ImGui_Context* ctx, ButtonId& sel,
 // The eight faders of the bank are wired to their Console channels below. Only
 // the LAYER keys act on a click; nothing here writes to the Console.
 // ⛔ Only call shapes drawUf8Vector already uses (no Bezier: lines in steps).
+// UAD layer, Settings: "Edit LEDs" mode and the key it edits (shared with the
+// LED menu beside the picture, drawUf8UadInspector).
+static bool s_uadLedMode = false;
+static bool s_uadOfflineTest = false;   // per session, off at every start
+static int  s_uadLedKey  = -1;
+static std::string s_uadSelDesc;
+static int uadSettingsLayer_()
+{
+    if (uf8::bindings::layerKind(uf8::bindings::getQuickLayer()) == uf8::bindings::LayerKind::Uad)
+        return uf8::bindings::getQuickLayer();
+    for (int l = 0; l < 3; ++l)
+        if (uf8::bindings::layerKind(l) == uf8::bindings::LayerKind::Uad) return l;
+    return -1;
+}
+
 void drawUf8UadVector(ImGui_Context* ctx)
 {
     constexpr float W = 1000, H_UF8 = 490;
@@ -2251,41 +2268,15 @@ void drawUf8UadVector(ImGui_Context* ctx)
     const float H = H_UF8 + (nCh > 0 ? 330.0f : 60.0f);
 
     // The virtual UF8: what is dragged or held sends the UF8's own frames
-    // through the layer (reasixty_uadSide), so it tests the real path.
-    static bool s_offlineTest = false;   // per session, off at every start
-    if (!st.online) {
-        ImGui_Checkbox(ctx, "Offline test: the virtual UF8 below writes to UAD Console without the Apollo (never 48V)",
-                       &s_offlineTest);
-    }
-    const bool offTest = s_offlineTest && !st.online;
-    // Use the UF8, or set its key colours: a click then picks the key.
-    static bool s_colMode = false;
-    static int  s_colKey = -1;
-    {
-        int m = s_colMode ? 1 : 0;
-        if (ImGui_RadioButtonEx(ctx, "Use the UF8##uad_mode_use", &m, 0)) s_colMode = false;
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        if (ImGui_RadioButtonEx(ctx, "Set key colours: click a key##uad_mode_col", &m, 1)) s_colMode = true;
-    }
-    int uadLayer = -1;
-    if (uf8::bindings::layerKind(uf8::bindings::getQuickLayer()) == uf8::bindings::LayerKind::Uad)
-        uadLayer = uf8::bindings::getQuickLayer();
-    for (int l = 0; uadLayer < 0 && l < 3; ++l)
-        if (uf8::bindings::layerKind(l) == uf8::bindings::LayerKind::Uad) uadLayer = l;
-    const std::map<int, int> uadCol = uadLayer >= 0 ? uf8::bindings::uadColours(uadLayer) : std::map<int, int>{};
-    {
-        char line[160];
-        if (st.online)
-            snprintf(line, sizeof(line), "Virtual UF8: writes to UAD Console.   Sent so far: %u", st.sent);
-        else if (offTest)
-            snprintf(line, sizeof(line), "Virtual UF8: OFFLINE TEST, writes to UAD Console.   Sent so far: %u", st.sent);
-        else
-            snprintf(line, sizeof(line), "Virtual UF8: Apollo offline, nothing is written (tick Offline test).   Sent so far: %u", st.sent);
-        int pushed = 0;
-        if (!st.online && !offTest) { ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF); ++pushed; }
-        ImGui_Text(ctx, line);
-        if (pushed) ImGui_PopStyleColor(ctx, &pushed);
-    }
+    // through the layer (reasixty_uadSide), so it tests the real path. The
+    // controls for it (offline test, mode) sit beside the picture
+    // (drawUf8UadControls), so the UF8 stands where it stands on every layer.
+    const bool offTest = s_uadOfflineTest && !st.online;
+    bool& s_colMode = s_uadLedMode;
+    int&  s_colKey = s_uadLedKey;
+    const int uadLayer = uadSettingsLayer_();
+    const std::map<int, ledlook::Look> uadLook = uadLayer >= 0 ? uf8::bindings::uadLeds(uadLayer)
+                                                                : std::map<int, ledlook::Look>{};
     uadside::Side& side = reasixty_uadSide();
     // The clock of main.cpp's nowMs_ (steady_clock, ms), which the UAD tick uses.
     const std::int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -2334,22 +2325,29 @@ void drawUf8UadVector(ImGui_Context* ctx)
         const int key = static_cast<int>(x) * 10000 + static_cast<int>(y);
         const bool hot = inside(x, y, w, h);
         const bool clicked = hot && canvasClicked && leftBtn == 0;
+        // The key's lamp as the UF8 shows it, when Settings gave it a look:
+        // Active while lit, Inactive while it does something, nothing else.
+        auto lkIt = uf8Key >= 0 ? uadLook.find(uf8Key) : uadLook.end();
+        std::uint32_t krgb = 0; int kbri = 0;
+        if (lkIt != uadLook.end()) ledlook::resolve(lkIt->second, lit ? 2 : active ? 1 : 0, krgb, kbri);
+        auto tint = [&](std::uint32_t rgb, int num, int den) {
+            return ((((rgb >> 16) & 0xFF) * num / den) << 24) | ((((rgb >> 8) & 0xFF) * num / den) << 16)
+                 | (((rgb & 0xFF) * num / den) << 8) | 0xFFu;
+        };
         if (s_colMode) {
-            // Colour mode: every key with a lamp can be picked, active or not.
-            if (clicked && uf8Key >= 0 && uf8Key != 0x76) s_colKey = uf8Key;
-            auto it = uf8Key >= 0 ? uadCol.find(uf8Key) : uadCol.end();
-            const std::uint32_t rgb = it != uadCol.end() ? midicc::kColours[it->second] : 0;
+            // LED mode: every key with a lamp can be picked, active or not.
+            if (clicked && uf8Key >= 0 && uf8Key != 0x76) { s_colKey = uf8Key; s_uadSelDesc = std::string(label); }
             const bool picked = uf8Key >= 0 && uf8Key == s_colKey;
-            const uint32_t fill = rgb ? (((((rgb >> 16) & 0xFF) * 2 / 5) << 24) | (((((rgb >> 8) & 0xFF) * 2 / 5)) << 16)
-                                         | ((((rgb & 0xFF) * 2 / 5)) << 8) | 0xFF)
+            const std::uint32_t rgb = kbri > 0 ? krgb : 0;
+            const uint32_t fill = rgb ? tint(rgb, kbri == ledlook::Bright ? 3 : 1, kbri == ledlook::Bright ? 4 : 3)
                                       : (uf8Key >= 0 && uf8Key != 0x76 ? 0x252A33FF : 0x1A1E24FF);
             const uint32_t border = picked ? 0xFFFFFFFF : rgb ? ((rgb << 8) | 0xFF) : 0x4A5060FF;
             rect_(c, x, y, w, h, fill, border, 3.5);
             ImGui_PushFont(ctx, nullptr, 10.0);
             drawTextCentered_(c, x + w / 2.0f, y + h / 2.0f, uf8Key >= 0 ? 0xE0E4EAFF : 0x70747CFF, label);
             ImGui_PopFont(ctx);
-            if (hot) hoverDesc = uf8Key < 0 || uf8Key == 0x76 ? std::string(label) + ": no lamp to colour"
-                                                               : std::string(label) + ": click to set its colour";
+            if (hot) hoverDesc = uf8Key < 0 || uf8Key == 0x76 ? std::string(label) + ": no lamp"
+                                                               : std::string(label) + ": click to edit its LED";
             return false;
         }
         if (clicked) { s_selKey = key; s_selDesc = std::string(label) + ": " + desc; }
@@ -2363,17 +2361,11 @@ void drawUf8UadVector(ImGui_Context* ctx)
             if (hot) hoverDesc = std::string(label) + ": not used on the UAD layer";
             return clicked;
         }
-        // A colour set in colour mode tints the key, brighter while lit.
-        auto cit = uf8Key >= 0 ? uadCol.find(uf8Key) : uadCol.end();
-        const std::uint32_t krgb = cit != uadCol.end() ? midicc::kColours[cit->second] : 0;
-        auto tint = [&](int num, int den) {
-            return ((((krgb >> 16) & 0xFF) * num / den) << 24) | ((((krgb >> 8) & 0xFF) * num / den) << 16)
-                 | (((krgb & 0xFF) * num / den) << 8) | 0xFFu;
-        };
+        const bool looked = lkIt != uadLook.end() && kbri > 0;
         const uint32_t fill = selected ? 0x4477CCFF : hot ? 0x3A4253FF
-                            : krgb ? (lit ? tint(3, 4) : tint(1, 3))
+                            : looked ? tint(krgb, kbri == ledlook::Bright ? 3 : 1, kbri == ledlook::Bright ? 4 : 3)
                             : lit ? 0x2F5A36FF : 0x2C3A2EFF;
-        const uint32_t border = selected ? 0xAACCFFFF : krgb ? ((krgb << 8) | 0xFF)
+        const uint32_t border = selected ? 0xAACCFFFF : looked ? ((krgb << 8) | 0xFF)
                               : lit ? 0x7FD07FFF : 0x6FA86FFF;
         rect_(c, x, y, w, h, fill, border, 3.5);
         ImGui_PushFont(ctx, nullptr, 10.0);
@@ -2888,48 +2880,81 @@ void drawUf8UadVector(ImGui_Context* ctx)
 
     if (!hoverDesc.empty()) ImGui_SetTooltip(ctx, hoverDesc.c_str());
     ImGui_PopFont(ctx);
-    if (!s_colMode) {
-        ImGui_Text(ctx, s_selDesc.empty() ? "Click a key, fader or channel to see what it does on this layer."
-                                          : s_selDesc.c_str());
-        return;
-    }
-    // The picked key's colour: the 8 of the palette, or the key's own.
-    if (s_colKey < 0 || uadLayer < 0) {
-        ImGui_Text(ctx, "Click a key on the UF8 above to set its colour.");
-        return;
-    }
-    std::string nm;
-    if (s_colKey >= 0x18 && s_colKey <= 0x1F) nm = "Soft-key " + std::to_string(s_colKey - 0x18 + 1);
-    else if (s_colKey >= 0x48 && s_colKey <= 0x4F) nm = "SEND/PLUG-IN " + std::to_string(s_colKey - 0x48 + 1);
-    else if (s_colKey >= 0x68 && s_colKey <= 0x6D) nm = std::string("Bank key ") + midicc::pageKey(s_colKey - 0x68);
-    else if (s_colKey >= 0x40 && s_colKey <= 0x42) nm = "LAYER " + std::to_string(s_colKey - 0x40 + 1);
-    else nm = midicc::keyName(s_colKey);
-    auto it = uadCol.find(s_colKey);
-    ImGui_Text(ctx, ("Colour of " + nm).c_str());
-    for (int i = 0; i < midicc::kColourCount; ++i) {
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        char id[32];
-        snprintf(id, sizeof(id), "##uad_col_%d", i);
-        int flags = 0;
-        double w = (it != uadCol.end() && it->second == i) ? 30.0 : 22.0, h = w;
-        if (ImGui_ColorButton(ctx, id, static_cast<int>((midicc::kColours[i] << 8) | 0xFF), &flags, &w, &h))
-            uf8::bindings::setUadColour(uadLayer, s_colKey, i);
-    }
+    ImGui_Text(ctx, s_colMode ? "Click a key with a lamp; its LED is set in the menu beside the UF8."
+                              : s_selDesc.empty() ? "Click a key, fader or channel to see what it does on this layer."
+                                                  : s_selDesc.c_str());
+}
+
+// Beside the UAD layer's UF8, above the LED menu: offline test, what is sent, mode.
+void drawUf8UadControls(ImGui_Context* ctx)
+{
+    const uadside::Status st = reasixty_uadStatus();
+    if (!st.online)
+        ImGui_Checkbox(ctx, "Offline test: the virtual UF8 writes without the Apollo (never 48V)", &s_uadOfflineTest);
+    const bool offTest = s_uadOfflineTest && !st.online;
+    char line[160];
+    if (st.online)
+        snprintf(line, sizeof(line), "Writes to UAD Console.  Sent so far: %u", st.sent);
+    else if (offTest)
+        snprintf(line, sizeof(line), "OFFLINE TEST, writes to UAD Console.  Sent so far: %u", st.sent);
+    else
+        snprintf(line, sizeof(line), "Apollo offline, nothing is written.  Sent so far: %u", st.sent);
+    int pushed = 0;
+    if (!st.online && !offTest) { ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF); ++pushed; }
+    ImGui_Text(ctx, line);
+    if (pushed) ImGui_PopStyleColor(ctx, &pushed);
+    int m = s_uadLedMode ? 1 : 0;
+    ImGui_Text(ctx, "Mode");
     ImGui_SameLine(ctx, nullptr, nullptr);
-    if (ImGui_Button(ctx, "Own colour##uad_col_own", nullptr, nullptr)) uf8::bindings::setUadColour(uadLayer, s_colKey, -1);
-    // Strip keys: the same colour for all eight in one go.
-    const bool strip = (s_colKey >= 0x18 && s_colKey <= 0x1F) || (s_colKey >= 0x20 && s_colKey <= 0x37)
-                    || (s_colKey >= 0x48 && s_colKey <= 0x4F);
+    if (ImGui_RadioButtonEx(ctx, "Use##uad_mode_use", &m, 0)) s_uadLedMode = false;
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    if (ImGui_RadioButtonEx(ctx, "Edit LEDs##uad_mode_col", &m, 1)) s_uadLedMode = true;
+    ImGui_TextDisabled(ctx, s_uadLedMode ? "A click on a key picks it for the LED menu below."
+                                         : "Clicks and drags on the UF8 work the Console.");
+}
+
+// The LED menu beside the UAD layer's UF8 (Frank 03.11.2026: "rechts neben dem
+// UF8 so wie beim MIDI CC Layer"): the picked key's LedLook, as the REAPER
+// layer's LED block. Active = the key's function is on (soloed, mode chosen),
+// Inactive = it does something here but is off.
+void drawUf8UadInspector(ImGui_Context* ctx)
+{
+    const int layer = uadSettingsLayer_();
+    if (!s_uadLedMode) {
+        ImGui_TextDisabled(ctx, "LEDs: switch Mode to 'Edit LEDs',");
+        ImGui_TextDisabled(ctx, "then click a key on the UF8.");
+        return;
+    }
+    if (layer < 0 || s_uadLedKey < 0) {
+        ImGui_Text(ctx, "Click a key on the UF8.");
+        return;
+    }
+    const int id = s_uadLedKey;
+    std::string nm;
+    if (id >= 0x18 && id <= 0x1F) nm = "Soft-key " + std::to_string(id - 0x18 + 1);
+    else if (id >= 0x48 && id <= 0x4F) nm = "SEND/PLUG-IN " + std::to_string(id - 0x48 + 1);
+    else if (id >= 0x68 && id <= 0x6D) nm = std::string("Bank key ") + midicc::pageKey(id - 0x68);
+    else if (id >= 0x40 && id <= 0x42) nm = "LAYER " + std::to_string(id - 0x40 + 1);
+    else nm = midicc::keyName(id);
+    ImGui_Text(ctx, nm.c_str());
+    const auto looks = uf8::bindings::uadLeds(layer);
+    auto it = looks.find(id);
+    const bool own = it == looks.end();
+    ledlook::Look l = own ? ledlook::Look{} : it->second;
+    ImGui_TextDisabled(ctx, own ? "Own lamp (as Rea-Sixty lights it). Change anything below to set a look."
+                                : "Active = on, Inactive = available but off.");
+    if (reasixty_drawLedLook(ctx, l, "uad")) uf8::bindings::setUadLed(layer, id, &l);
+    if (!own && ImGui_Button(ctx, "Own lamp##uad_led_own", nullptr, nullptr)) uf8::bindings::setUadLed(layer, id, nullptr);
+    const bool strip = (id >= 0x18 && id <= 0x1F) || (id >= 0x20 && id <= 0x37) || (id >= 0x48 && id <= 0x4F);
     if (strip) {
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        if (ImGui_Button(ctx, "Same for all 8##uad_col_all", nullptr, nullptr)) {
-            const int c = it != uadCol.end() ? it->second : -1;
+        if (!own) ImGui_SameLine(ctx, nullptr, nullptr);
+        if (ImGui_Button(ctx, "Same for all 8##uad_led_all", nullptr, nullptr)) {
             for (int k = 0; k < 8; ++k) {
-                int id = s_colKey;
-                if (s_colKey >= 0x20 && s_colKey <= 0x37) id = 0x20 + k * 3 + (s_colKey - 0x20) % 3;
-                else if (s_colKey >= 0x48) id = 0x48 + k;
-                else id = 0x18 + k;
-                uf8::bindings::setUadColour(uadLayer, id, c);
+                int t = id;
+                if (id >= 0x20 && id <= 0x37) t = 0x20 + k * 3 + (id - 0x20) % 3;
+                else if (id >= 0x48) t = 0x48 + k;
+                else t = 0x18 + k;
+                uf8::bindings::setUadLed(layer, t, own ? nullptr : &l);
             }
         }
     }
@@ -2958,20 +2983,6 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
     // Values are the layer's on the page shown (unknown on other pages).
     auto reasixty_ccValue = [&](int kind, int idx) { return reasixty_ccValueOn(page, kind, idx); };
 
-    ImGui_Spacing(ctx);
-    if (s_test && !live) {
-        ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF);
-        ImGui_Text(ctx, "This layer is not the active one, so nothing is sent.");
-        ImGui_PopStyleColor(ctx, nullptr);
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        char b[48];
-        snprintf(b, sizeof(b), "Switch to layer %d##cc_virt_go", layer + 1);
-        if (ImGui_Button(ctx, b, nullptr, nullptr)) {
-            const bnd::ButtonId ids[3] = {bnd::ButtonId::Layer1, bnd::ButtonId::Layer2, bnd::ButtonId::Layer3};
-            bnd::dispatch(ids[layer], true);
-            bnd::dispatch(ids[layer], false);
-        }
-    }
     const bool send = s_test && live;
 
     constexpr float W = 1000, H = 490;
@@ -3047,10 +3058,13 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
     auto pageKey = [&](float x, float y, float w, float h, Kind k, int i, const std::string& what) {
         const midicc::Control& ct = P.at(k, i);
         const bool on = midicc::assigned(ct);
-        const bool lit = on && reasixty_ccValue(static_cast<int>(k), i) >= 64;
-        if (tileDraw(x, y, w, h, on ? ctlText(k, ct) : what, true, on,
+        const int val = reasixty_ccValue(static_cast<int>(k), i);
+        std::uint32_t lrgb = 0; int lbri = 0;   // the lamp as the UF8 shows it (LedLook)
+        ledlook::resolve(ct.led, midicc::lampState(ct, val >= 0, val), lrgb, lbri);
+        const bool lit = lbri == ledlook::Bright;
+        if (tileDraw(x, y, w, h, on ? ctlText(k, ct) : what, true, on || lbri > 0,
                      !s_test && reasixty_ccIsSelected(static_cast<int>(k), i), lit,
-                     on && midicc::hasColour(k) ? midicc::colourRgb(ct) : 0)) {
+                     midicc::hasColour(k) && lbri > 0 ? lrgb : 0)) {
             hoverDesc = ctlDesc(k, ct, what) + ", this page";
             if (canvasClicked) {
                 if (!s_test) reasixty_ccSelect(static_cast<int>(k), i);
@@ -3063,10 +3077,15 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
         const bool usable = midicc::keyAssignable(id);
         auto it = L.keys.find(id);
         const bool on = usable && it != L.keys.end() && midicc::assigned(it->second);
-        const bool lit = on && reasixty_ccKeyValue(id) >= 64;
+        std::uint32_t lrgb = 0; int lbri = 0;   // the lamp as the UF8 shows it (LedLook)
+        if (usable && it != L.keys.end()) {
+            const int kv = reasixty_ccKeyValue(id);
+            ledlook::resolve(it->second.led, midicc::lampState(it->second, kv >= 0, kv), lrgb, lbri);
+        }
+        const bool lit = lbri == ledlook::Bright;
         const std::string lbl = on && !it->second.name.empty() ? it->second.name : std::string(label);
-        if (tileDraw(x, y, w, h, lbl, usable, on, usable && !s_test && reasixty_ccIsSelected(kSelKey, id), lit,
-                     on && midicc::keyHasLamp(id) ? midicc::colourRgb(it->second) : 0)) {
+        if (tileDraw(x, y, w, h, lbl, usable, on || lbri > 0, usable && !s_test && reasixty_ccIsSelected(kSelKey, id), lit,
+                     midicc::keyHasLamp(id) && lbri > 0 ? lrgb : 0)) {
             if (!usable) { hoverDesc = std::string(label) + ": keeps its job, cannot carry a CC"; return; }
             hoverDesc = on ? ctlDesc(Kind::Soft, it->second, midicc::keyName(id)) + ", all pages"
                            : midicc::keyName(id) + ": no CC, keeps its normal job (click to assign)";
@@ -8811,21 +8830,38 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
             // with its own editor (SettingsScreen_MidiCc.cpp).
             if (drawUf8LayerKindRow(ctx, s_editLayer)) {
                 if (uf8::bindings::layerKind(s_editLayer) == uf8::bindings::LayerKind::Uad) {
-                    drawUf8UadLayer(ctx, s_editLayer);
+                    // The UF8 right under the layer row, as on a REAPER layer;
+                    // status, mode and the LED menu beside it (below when narrow).
+                    double availW = 0, availH = 0;
+                    ImGui_GetContentRegionAvail(ctx, &availW, &availH);
+                    ImGui_BeginGroup(ctx);
                     drawUf8UadVector(ctx);
+                    ImGui_EndGroup(ctx);
+                    if (availW >= 1000.0 + 360.0) ImGui_SameLine(ctx, nullptr, nullptr);
+                    else ImGui_Separator(ctx);
+                    ImGui_BeginGroup(ctx);
+                    drawUf8UadLayer(ctx, s_editLayer);
+                    drawUf8UadControls(ctx);
+                    ImGui_Separator(ctx);
+                    drawUf8UadInspector(ctx);
+                    ImGui_EndGroup(ctx);
                 } else {
                     // Header, then the UF8 with the picked control beside it
                     // (below it when the window is too narrow).
+                    // The UF8 right under the layer row, as on a REAPER layer;
+                    // presets, mode, connections, pages and the control beside it.
                     bool test = false;
-                    const int pg = drawUf8CcHeader(ctx, s_editLayer, reasixty_ccLivePage(), &test);
+                    const int pg = reasixty_ccEditPageFor(reasixty_ccLivePage(), &test);
                     double availW = 0, availH = 0;
                     ImGui_GetContentRegionAvail(ctx, &availW, &availH);
                     ImGui_BeginGroup(ctx);
                     drawUf8CcVirtual(ctx, s_editLayer, pg, test);
                     ImGui_EndGroup(ctx);
-                    if (availW >= 1000.0 + 320.0) ImGui_SameLine(ctx, nullptr, nullptr);
+                    if (availW >= 1000.0 + 360.0) ImGui_SameLine(ctx, nullptr, nullptr);
                     else ImGui_Separator(ctx);
                     ImGui_BeginGroup(ctx);
+                    drawUf8CcHeader(ctx, s_editLayer, reasixty_ccLivePage(), &test);
+                    ImGui_Separator(ctx);
                     drawUf8CcInspector(ctx, s_editLayer, pg);
                     ImGui_EndGroup(ctx);
                 }

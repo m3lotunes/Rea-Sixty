@@ -23159,6 +23159,7 @@ static midicc::State    g_ccState;
 // Which of the other keys, and whether the channel encoder, carry a CC on the
 // active CC layer: the USB thread reads these to decide what is the layer's.
 static std::array<std::atomic<bool>, 128> g_ccKeyAssigned{};
+static std::array<std::atomic<bool>, 128> g_ccKeyLed{};      // the layer paints its lamp
 static std::atomic<bool> g_ccEncAssigned{false};
 // The global lamp of a key the CC layer can give a colour (midicc::keyHasLamp).
 static bool ccLedOfKey_(int id, uf8::Uf8GlobalLed& out)
@@ -23188,7 +23189,7 @@ static bool ccOwnsLed_(uf8::Uf8GlobalLed cell)
     if (!uf8::bindings::ccLayerActive()) return false;
     for (int id = 0x40; id < 0x80; ++id) {
         uf8::Uf8GlobalLed c;
-        if (ccLedOfKey_(id, c) && c == cell) return g_ccKeyAssigned[static_cast<std::size_t>(id)].load();
+        if (ccLedOfKey_(id, c) && c == cell) return g_ccKeyLed[static_cast<std::size_t>(id)].load();
     }
     return false;
 }
@@ -23199,6 +23200,10 @@ static void ccPublishAssigned_(const midicc::Layer* L)
         if (L) {
             auto it = L->keys.find(id);
             on = it != L->keys.end() && midicc::assigned(it->second) && midicc::keyAssignable(id);
+            g_ccKeyLed[static_cast<std::size_t>(id)].store(
+                it != L->keys.end() && midicc::keyAssignable(id) && (on || it->second.led.showWhenEmpty));
+        } else {
+            g_ccKeyLed[static_cast<std::size_t>(id)].store(false);
         }
         g_ccKeyAssigned[static_cast<std::size_t>(id)].store(on);
     }
@@ -41259,24 +41264,29 @@ static void ccPaintSurface_()
                 ? uf8ValueLine(utf8ToLatin1(displayName(rk, rc)), valueText(rv, rKnown))
                 : std::string();
             v.slotLabel = utf8ToLatin1(displayName(Kind::Soft, sc));
-            const bool sLit = sOn && S.isKnown(page, Kind::Soft, l) && S.v(page, Kind::Soft, l) >= 64;
-            v.topKey    = !sOn ? 0 : (sLit ? 2 : 1);
-            v.topKeyRgb = colourRgb(sc);
+            {   // the soft-key lamp: its LedLook for on / off / no CC
+                std::uint32_t rgb = 0; int bri = 0;
+                ledlook::resolve(sc.led, lampState(sc, S.isKnown(page, Kind::Soft, l), S.v(page, Kind::Soft, l)), rgb, bri);
+                v.topKey    = bri;
+                v.topKeyRgb = rgb ? rgb : 0xFFFFFF;
+            }
             v.sel       = fOn;
             v.selRgb    = colourRgb(fc);
-            // SOLO / CUT / SEL with their own CC: their colour, lit while on.
-            auto keyCol = [&](int id) -> std::uint32_t {
+            // SOLO / CUT / SEL with their own CC (or a LED shown without one):
+            // their LedLook for on / off.
+            auto keyLook = [&](int id, std::int8_t& bri, std::uint32_t& rgb) {
                 auto it = L.keys.find(id);
-                return it != L.keys.end() && assigned(it->second) ? colourRgb(it->second) : 0;
+                if (it == L.keys.end()) return false;
+                const Control& kc = it->second;
+                if (!assigned(kc) && !kc.led.showWhenEmpty) return false;
+                int b = 0;
+                ledlook::resolve(kc.led, lampState(kc, S.keyKnown[id], S.keyValue[id]), rgb, b);
+                bri = static_cast<std::int8_t>(b);
+                return true;
             };
-            v.solo      = S.keyLit(0x20 + l * 3);
-            v.soloRgb   = keyCol(0x20 + l * 3);
-            v.cut       = S.keyLit(0x21 + l * 3);
-            v.cutRgb    = keyCol(0x21 + l * 3);
-            if (const std::uint32_t sc = keyCol(0x22 + l * 3)) {
-                v.sel    = S.keyLit(0x22 + l * 3);
-                v.selRgb = sc;
-            }
+            keyLook(0x20 + l * 3, v.soloBri, v.soloRgb);
+            keyLook(0x21 + l * 3, v.cutBri, v.cutRgb);
+            keyLook(0x22 + l * 3, v.selBri, v.selRgb);
             v.drive     = fOn && fKnown;
             v.faderPb   = v.drive ? static_cast<uint16_t>(valueToFader(fv, hiResActive(fk, fc))) : 0;
             bool engaged = g_faderMotorEngaged[s].load();
@@ -41328,12 +41338,7 @@ static void uadTick_()
             if (uf8::bindings::layerKind(l) == uf8::bindings::LayerKind::Uad) ql = l;
         if (ql >= 0) g_uadSide.setQuick2(uf8::bindings::uadQuick2(ql));
         g_uadSide.setTouchSelects(g_touchSelectsChannel.load());
-        if (ql >= 0) {
-            std::map<int, std::uint32_t> col;
-            for (const auto& [id, c] : uf8::bindings::uadColours(ql))
-                if (c >= 0 && c < midicc::kColourCount) col[id] = midicc::kColours[c];
-            g_uadSide.setColours(col);
-        }
+        if (ql >= 0) g_uadSide.setLooks(uf8::bindings::uadLeds(ql));
     }
     if (idx != g_uadIdx) {
         const bool entered = idx >= 0 && g_uadIdx < 0;
@@ -46526,10 +46531,13 @@ void pushUf8GlobalLeds()
     if (g_ccIdx >= 0) {
         for (const auto& [id, c] : g_ccLayer.keys) {
             uf8::Uf8GlobalLed cell;
-            if (!midicc::assigned(c) || !ccLedOfKey_(id, cell)) continue;
-            const uf8::LedColour col = uf8::ledColourForTrackRgb(midicc::colourRgb(c));
-            sendUf8GlobalLedDirect_(cell, g_ccState.keyLit(id) ? uf8::GlobalLedState::Bright
-                                                               : uf8::GlobalLedState::Dim, &col);
+            if ((!midicc::assigned(c) && !c.led.showWhenEmpty) || !ccLedOfKey_(id, cell)) continue;
+            std::uint32_t rgb = 0; int bri = 0;
+            ledlook::resolve(c.led, midicc::lampState(c, g_ccState.keyKnown[id], g_ccState.keyValue[id]), rgb, bri);
+            const uf8::LedColour col = uf8::ledColourForTrackRgb(rgb);
+            sendUf8GlobalLedDirect_(cell, bri == ledlook::Bright ? uf8::GlobalLedState::Bright
+                                        : bri == ledlook::Dim    ? uf8::GlobalLedState::Dim
+                                                                 : uf8::GlobalLedState::Off, &col);
         }
     }
 

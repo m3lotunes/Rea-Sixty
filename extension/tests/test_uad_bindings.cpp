@@ -62,14 +62,19 @@ int main()
     EXPECT((bnd::uadQuick2(2) == std::vector<std::string>{"0/in/2", "0/aux/1"}));
     EXPECT(bnd::uadQuick2(0).empty());
 
-    // Key colours persist in the same "uad" block; -1 takes one back.
-    bnd::setUadColour(2, 0x20, 2);
-    bnd::setUadColour(2, 0x6E, 5);
-    bnd::setUadColour(2, 0x18, 3);
-    bnd::setUadColour(2, 0x18, -1);
-    bnd::load();
-    EXPECT((bnd::uadColours(2) == std::map<int, int>{{0x20, 2}, {0x6E, 5}}));
-    EXPECT(bnd::uadColours(0).empty());
+    // Key lamps persist in the same "uad" block; nullptr takes one back.
+    {
+        ledlook::Look a = ledlook::fromColour(0xFFFF00), b;
+        b.activeRgb = 0x00FF00; b.inactiveRgb = 0x0000FF; b.inactiveBri = ledlook::Off; b.showWhenEmpty = true;
+        bnd::setUadLed(2, 0x20, &a);
+        bnd::setUadLed(2, 0x6E, &b);
+        bnd::setUadLed(2, 0x18, &a);
+        bnd::setUadLed(2, 0x18, nullptr);
+        bnd::load();
+        const auto m = bnd::uadLeds(2);
+        EXPECT(m.size() == 2 && m.count(0x20) && m.at(0x20) == a && m.count(0x6E) && m.at(0x6E) == b);
+        EXPECT(bnd::uadLeds(0).empty());
+    }
 
     // Reload from disk.
     bnd::setActiveLayer(2);

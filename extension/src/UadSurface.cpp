@@ -692,9 +692,18 @@ void Surface::paint(std::int64_t now, Out& out)
                              : std::string();
             lower       = online ? potText_(idx, false) : "offline";
             v.sel       = idx == selected_;
-            v.selRgb    = colourOf_(0x22 + s * 3, 0xFFFFFF);
-            v.soloRgb   = colourOf_(0x20 + s * 3, 0);
-            v.cutRgb    = colourOf_(0x21 + s * 3, 0);
+            v.selRgb    = 0xFFFFFF;
+            // Looks from Settings: Active while on, Inactive while off.
+            auto stripLook = [&](int id, bool on, std::int8_t& bri, std::uint32_t& rgb) {
+                if (const ledlook::Look* lk = look_(id)) {
+                    int b = 0;
+                    ledlook::resolve(*lk, on ? 2 : 1, rgb, b);
+                    bri = static_cast<std::int8_t>(b);
+                }
+            };
+            stripLook(0x22 + s * 3, idx == selected_, v.selBri, v.selRgb);
+            stripLook(0x20 + s * 3, in && in->solo, v.soloBri, v.soloRgb);
+            stripLook(0x21 + s * 3, in ? in->mute : ax ? ax->mute : false, v.cutBri, v.cutRgb);
             v.cut       = in ? in->mute : ax ? ax->mute : false;
             v.solo      = in ? in->solo : false;
             v.drive     = online;
@@ -776,7 +785,14 @@ void Surface::paint(std::int64_t now, Out& out)
             }
         }
         v.topKey    = lit < 0 ? 0 : lit;
-        v.topKeyRgb = colourOf_(0x18 + s, softBank_ == 2 && s == 0 ? 0xFF2020 : 0xFFFFFF);   // 48V red by default
+        v.topKeyRgb = softBank_ == 2 && s == 0 ? 0xFF2020 : 0xFFFFFF;    // 48V in red
+        if (const ledlook::Look* lk = look_(0x18 + s)) {
+            // lit: 2 on, 1 does something, -1 / 0 nothing
+            std::uint32_t rgb = 0; int b = 0;
+            ledlook::resolve(*lk, lit < 0 ? 0 : lit, rgb, b);
+            v.topKey = b;
+            if (rgb) v.topKeyRgb = rgb;
+        }
 
         uf8strips::paintStrip(
             uf8strips::Cells{c.upper, c.csType, c.chanNum, c.faderText, c.faderUnit, c.valueLine,
@@ -803,9 +819,14 @@ void Surface::paint(std::int64_t now, Out& out)
     for (const auto& st : strips_) if (const uad::Input* in = m_.input(st)) { sendCount = static_cast<int>(in->sends.size()); break; }
     const int maxB = strips_.empty() ? 0 : (static_cast<int>(strips_.size()) - 1) / 8;
     auto lamp = [&](G led, int state) {
-        // The key's own colour unless Settings gave it one; the cache holds the
-        // state and a hash of that colour.
-        const std::uint32_t rgb = colourOf_(ledKeyId(led), 0);
+        // The key's own lamp unless Settings gave it a look (Active for on,
+        // Inactive for available); the cache holds the state and a colour hash.
+        std::uint32_t rgb = 0;
+        if (const ledlook::Look* lk = look_(ledKeyId(led))) {
+            int b = 0;
+            ledlook::resolve(*lk, state, rgb, b);
+            state = b;
+        }
         const int h = rgb ? static_cast<int>(((rgb >> 18) ^ (rgb >> 12) ^ (rgb >> 6) ^ rgb) & 0x1F) : 0;
         const std::int8_t key = static_cast<std::int8_t>(state | (h << 2));
         std::int8_t& last = lastGlobal_[static_cast<std::size_t>(led)];

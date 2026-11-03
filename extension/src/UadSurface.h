@@ -18,6 +18,7 @@
 //
 // Threads: none of its own and no lock; the caller serialises (as McuSurface).
 //
+#include "LedLook.h"
 #include "UadModel.h"
 #include "Uf8Frames.h"
 
@@ -79,9 +80,9 @@ public:
     // QUICK 2's channels (bindings.json, Layer::uadQuick2, as Model::stripId).
     // QUICK 1 is every channel in Console order.
     void setQuick2(const std::vector<std::string>& ids) { quick2_ = ids; }
-    // Lamp colours per UF8 key id (RGB), from bindings.json; a key without one keeps
-    // its own colour.
-    void setColours(const std::map<int, std::uint32_t>& c) { colours_ = c; }
+    // Lamp looks per UF8 key id (LedLook: Active / Inactive colour and brightness),
+    // from bindings.json; a key without one keeps its own lamp.
+    void setLooks(const std::map<int, ledlook::Look>& l) { looks_ = l; }
     // Rea-Sixty's "Touch selects channel" (Settings → General): a fader touch is SEL.
     void setTouchSelects(bool on) { touchSelects_ = on; }
     int  quick() const { return quick_; }           // 0 = QUICK 1, 1 = QUICK 2
@@ -157,11 +158,11 @@ private:
     std::array<int, 2> quickBank_{};           // each view keeps its own bank
     int          slot_ = -1, paramPage_ = 0;   // PLUG-IN: edited slot, parameter page
     bool         touchSelects_ = false;
-    std::map<int, std::uint32_t> colours_;
-    std::uint32_t colourOf_(int id, std::uint32_t own) const
+    std::map<int, ledlook::Look> looks_;
+    const ledlook::Look* look_(int id) const
     {
-        auto it = colours_.find(id);
-        return it != colours_.end() ? it->second : own;
+        auto it = looks_.find(id);
+        return it != looks_.end() ? &it->second : nullptr;
     }
     int          spKey_ = -1;                  // SEND/PLUG-IN key held in PLUG-IN mode
     std::int64_t spDownMs_ = 0;

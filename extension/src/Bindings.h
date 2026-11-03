@@ -871,9 +871,9 @@ struct Layer {
     // UAD Console layer: the channels QUICK 2 puts on the faders, in order, as
     // UadModel::stripId ("0/in/2", "0/aux/1"). Empty = none chosen yet.
     std::vector<std::string> uadQuick2;
-    // UAD Console layer: a lamp colour per UF8 key id (midicc::kColours index).
-    // Keys without an entry keep their own colour.
-    std::map<int, int> uadColours;
+    // UAD Console layer: a lamp look per UF8 key id (LedLook, as the REAPER
+    // layer's LED block). Keys without an entry keep their own lamp.
+    std::map<int, ledlook::Look> uadLeds;
 };
 
 // A named CC set, recallable into any CC layer (Save / Load in the layer block).
@@ -1300,9 +1300,9 @@ bool          anyUadLayer();
 // The UAD layer's QUICK 2 channel list (Layer::uadQuick2). The setter persists.
 std::vector<std::string> uadQuick2(int layer);
 void          setUadQuick2(int layer, const std::vector<std::string>& ids);
-// The UAD layer's key colours (Layer::uadColours). colour -1 = back to the key's own.
-std::map<int, int> uadColours(int layer);
-void          setUadColour(int layer, int keyId, int colour);
+// The UAD layer's key lamps (Layer::uadLeds). nullptr = back to the key's own.
+std::map<int, ledlook::Look> uadLeds(int layer);
+void          setUadLed(int layer, int keyId, const ledlook::Look* look);
 // Presets: save overwrites by name.
 std::vector<std::string> ccPresetNames();
 bool          saveCcPreset(const std::string& name, int layer);

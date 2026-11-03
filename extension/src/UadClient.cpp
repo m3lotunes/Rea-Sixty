@@ -277,10 +277,10 @@ void Side::setQuick2(const std::vector<std::string>& ids)
     surf_.setQuick2(ids);
 }
 
-void Side::setColours(const std::map<int, std::uint32_t>& c)
+void Side::setLooks(const std::map<int, ledlook::Look>& l)
 {
     std::lock_guard<std::mutex> lk(mx_);
-    surf_.setColours(c);
+    surf_.setLooks(l);
 }
 
 void Side::setTouchSelects(bool on)

@@ -53,7 +53,9 @@ int main()
     cc.pages[3].fader[7].hiRes = true;
     cc.pages[3].fader[7].channel = 12;
     cc.pages[3].fader[7].name = "Fine \"q\"";
-    cc.pages[3].fader[7].colour = 6;
+    midicc::setColour(cc.pages[3].fader[7], 6);
+    cc.pages[3].fader[6].led.inactiveBri = ledlook::Off; cc.pages[3].fader[6].led.showWhenEmpty = true;
+    cc.pages[3].fader[6].led.activeRgb = 0x123456;
     cc.pages[4].foot[1].number = 66;
     cc.pages[4].foot[1].behaviour = midicc::Behaviour::Hold;
     cc.pages[0].vpot[2].number = -1;                     // unassigned survives too
@@ -85,7 +87,9 @@ int main()
     EXPECT(!r.followItems);
     EXPECT(r.defaultChannel == 5);
     EXPECT(r.pages[3].fader[7].number == 31 && r.pages[3].fader[7].hiRes);
-    EXPECT(r.pages[3].fader[7].channel == 12 && r.pages[3].fader[7].colour == 6);
+    EXPECT(r.pages[3].fader[7].channel == 12 && r.pages[3].fader[7].led == ledlook::fromColour(midicc::kColours[6]));
+    EXPECT(r.pages[3].fader[6].led.activeRgb == 0x123456 && r.pages[3].fader[6].led.inactiveBri == ledlook::Off
+           && r.pages[3].fader[6].led.showWhenEmpty);
     EXPECT(r.pages[3].fader[7].name == "Fine \"q\"");
     EXPECT(r.pages[4].foot[1].number == 66 && r.pages[4].foot[1].behaviour == midicc::Behaviour::Hold);
     EXPECT(r.pages[0].vpot[2].number == -1);

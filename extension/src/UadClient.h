@@ -136,7 +136,7 @@ public:
     // QUICK 2's channels (bindings.json); the timer passes them every tick.
     void setQuick2(const std::vector<std::string>& ids);
     void setTouchSelects(bool on);
-    void setColours(const std::map<int, std::uint32_t>& c);
+    void setLooks(const std::map<int, ledlook::Look>& l);
 
 private:
     void virtualFrame_(const uf8frames::Frame& f, std::int64_t nowMs, bool offlineTest);

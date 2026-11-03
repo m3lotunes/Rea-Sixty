@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <iterator>
 #include <map>
+#include "LedLook.h"
 #include <string>
 #include <utility>
 #include <vector>
@@ -81,7 +82,9 @@ struct Control {
     bool hiRes     = false;    // faders only, CC 0..31 only (hiResActive)
     Behaviour behaviour = Behaviour::Toggle;   // keys only
     std::string name;          // shown on the UF8, 8 characters
-    int  colour    = 0;        // palette index, like the binding colours
+    // The lamp: Active while the value is on, Inactive while off, as the REAPER
+    // layer's LED block (LedLook.h). Default: red, bright / dim.
+    ledlook::Look led = ledlook::fromColour(0xFF0000);
 };
 
 struct Page {
@@ -178,12 +181,23 @@ struct Layer {
 constexpr int kColourCount = 8;
 constexpr uint32_t kColours[kColourCount] = {
     0xFF0000, 0xFF8000, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x0000FF, 0xFF00FF, 0xFFFFFF };
-inline uint32_t colourRgb(const Control& c)
+// The control's colour where only one is shown (SEL, the colour bar): Active.
+inline uint32_t colourRgb(const Control& c) { return c.led.activeRgb; }
+// A palette colour for both states (factory sets, files from before LedLook).
+inline void setColour(Control& c, int idx)
 {
-    return kColours[(c.colour >= 0 && c.colour < kColourCount) ? c.colour : 0];
+    c.led = ledlook::fromColour(kColours[(idx >= 0 && idx < kColourCount) ? idx : 0]);
 }
 
+
 inline bool assigned(const Control& c) { return c.number >= 0 && c.number <= 127; }
+
+// The lamp state of an assigned control: 2 on (value >= 64), 1 off; 0 = none.
+inline int lampState(const Control& c, bool known, int value)
+{
+    if (!assigned(c)) return 0;
+    return known && value >= 64 ? 2 : 1;
+}
 
 inline int channelOf(const Control& c, int defaultChannel)
 {
@@ -260,7 +274,7 @@ inline Layer controllerLayer()
     for (int p = 0; p < kPages; ++p) {
         Page& pg = L.pages[static_cast<std::size_t>(p)];
         for (int i = 0; i < kStrips; ++i) {
-            auto set = [&](Control& c, int n, int col) { c.channel = p + 1; c.number = n; c.colour = col; };
+            auto set = [&](Control& c, int n, int col) { c.channel = p + 1; c.number = n; setColour(c, col); };
             set(pg.fader[i], 20 + i, 7);              // white
             set(pg.vpot[i], 102 + i, 5);              // blue
             set(pg.push[i], 110 + i, 5);
@@ -273,7 +287,7 @@ inline Layer controllerLayer()
         pg.foot[1].behaviour = Behaviour::Hold;
     }
     auto key = [&](int id, int n, int col) {
-        Control c; c.channel = 16; c.number = n; c.colour = col;
+        Control c; c.channel = 16; c.number = n; setColour(c, col);
         L.keys[id] = c;
     };
     for (int s = 0; s < kStrips; ++s) {

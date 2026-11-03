@@ -52,6 +52,11 @@ struct View {
     bool          solo      = false;
     std::uint32_t cutRgb    = 0;          // 0 = the lamp's own colour
     std::uint32_t soloRgb   = 0;
+    // LedLook brightness (0 off, 1 dim, 2 bright) with the Rgb above, instead of
+    // the on/off flags; -1 = the flags as before.
+    std::int8_t   selBri    = -1;
+    std::int8_t   cutBri    = -1;
+    std::int8_t   soloBri   = -1;
     bool          drive     = false;      // the fader has a value to go to
     std::uint16_t faderPb   = 0;
     std::uint16_t ring      = 0;          // uf8::vpotPos*
@@ -121,20 +126,40 @@ bool paintStrip(Cells c, const View& v, std::uint8_t st, bool touched, bool& eng
         const std::uint32_t h = rgb ? (((rgb >> 18) ^ (rgb >> 12) ^ (rgb >> 6) ^ rgb) & 0x3F) : 0;
         return static_cast<std::int8_t>((on ? 1 : 0) | (h << 1));
     };
-    const std::int8_t sel = key(v.sel, v.selRgb);
-    if (c.sel != sel) {
+    // A brightness from LedLook: bright = on, dim = off in the colour's dim
+    // shade, off = the dim bytes zeroed.
+    auto briKey = [](int bri, std::uint32_t rgb) {
+        const std::uint32_t h = (((rgb >> 18) ^ (rgb >> 12) ^ (rgb >> 6) ^ rgb) & 0x1F);
+        return static_cast<std::int8_t>(0x40 | (bri & 3) | (h << 2));
+    };
+    auto briFrames = [&](uf8::LedClass cls, int bri, std::uint32_t rgb) {
+        uf8::LedColour col = uf8::ledColourForTrackRgb(rgb);
+        if (bri <= 0) { col.aDim = 0; col.bDim = 0; }
+        return uf8::buildLedColourPair(st, cls, bri >= 2, col);
+    };
+    const std::int8_t sel = v.selBri >= 0 ? briKey(v.selBri, v.selRgb) : key(v.sel, v.selRgb);
+    if (c.sel != sel && v.selBri >= 0) {
+        c.sel = sel;
+        leds(briFrames(uf8::LedClass::Sel, v.selBri, v.selRgb));
+    } else if (c.sel != sel) {
         c.sel = sel;
         leds(uf8::buildLedColourPair(st, uf8::LedClass::Sel, v.sel,
                                      uf8::ledColourForTrackRgb(v.selRgb)));
     }
-    const std::int8_t cut = key(v.cut, v.cutRgb);
-    if (c.cut != cut) {
+    const std::int8_t cut = v.cutBri >= 0 ? briKey(v.cutBri, v.cutRgb) : key(v.cut, v.cutRgb);
+    if (c.cut != cut && v.cutBri >= 0) {
+        c.cut = cut;
+        leds(briFrames(uf8::LedClass::Cut, v.cutBri, v.cutRgb));
+    } else if (c.cut != cut) {
         c.cut = cut;
         leds(v.cutRgb ? uf8::buildLedColourPair(st, uf8::LedClass::Cut, v.cut, uf8::ledColourForTrackRgb(v.cutRgb))
                       : uf8::buildLedColourPair(st, uf8::LedClass::Cut, v.cut));
     }
-    const std::int8_t solo = key(v.solo, v.soloRgb);
-    if (c.solo != solo) {
+    const std::int8_t solo = v.soloBri >= 0 ? briKey(v.soloBri, v.soloRgb) : key(v.solo, v.soloRgb);
+    if (c.solo != solo && v.soloBri >= 0) {
+        c.solo = solo;
+        leds(briFrames(uf8::LedClass::Solo, v.soloBri, v.soloRgb));
+    } else if (c.solo != solo) {
         c.solo = solo;
         leds(v.soloRgb ? uf8::buildLedColourPair(st, uf8::LedClass::Solo, v.solo, uf8::ledColourForTrackRgb(v.soloRgb))
                        : uf8::buildLedColourPair(st, uf8::LedClass::Solo, v.solo));

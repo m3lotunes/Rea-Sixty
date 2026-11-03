@@ -2073,7 +2073,7 @@ void serializeBindingBody_(const Binding& bd, std::ostringstream& os)
 // "midi_cc": {"outputs": [...], "input": "", "follow_items": true,
 //   "default_channel": 1, "pages": [ {"fader": [ctl x8], "vpot": [...],
 //   "push": [...], "soft": [...], "send_plugin": [...], "foot": [ctl x2]} x5 ]}
-// ctl: {"ch", "n", "hr", "beh", "name", "col"}. Additive keys, no version bump:
+// ctl: {"ch", "n", "hr", "beh", "name", "led": LedLook} ("col", a palette index, read only). Additive keys, no version bump:
 // an older Rea-Sixty skips them and reads the layer as a Reaper layer.
 const char* const kCcKindKeys_[midicc::kKindCount] = {
     "fader", "vpot", "push", "soft", "send_plugin", "foot" };
@@ -2109,7 +2109,7 @@ void serializeCcLayer_(const midicc::Layer& L, std::ostringstream& os, const cha
                    << ", \"beh\": \"" << (c.behaviour == midicc::Behaviour::Hold ? "hold" : "toggle")
                    << "\", \"name\": ";
                 appendEscaped(os, c.name);
-                os << ", \"col\": " << c.colour << "}";
+                os << ", \"led\": " << ledlook::toJson(c.led) << "}";
             }
             os << "]";
         }
@@ -2123,15 +2123,16 @@ void serializeCcLayer_(const midicc::Layer& L, std::ostringstream& os, const cha
            << ", \"beh\": \"" << (c.behaviour == midicc::Behaviour::Hold ? "hold" : "toggle")
            << "\", \"name\": ";
         appendEscaped(os, c.name);
-        os << ", \"col\": " << c.colour;
+        os << ", \"led\": " << ledlook::toJson(c.led);
     };
     bool anyKey = false;
-    for (const auto& [id, c] : L.keys) anyKey = anyKey || midicc::assigned(c);
+    auto keep = [](const midicc::Control& c) { return midicc::assigned(c) || c.led.showWhenEmpty; };
+    for (const auto& [id, c] : L.keys) anyKey = anyKey || keep(c);
     if (anyKey) {
         os << ",\n" << pad << "  \"keys\": [";
         bool first = true;
         for (const auto& [id, c] : L.keys) {
-            if (!midicc::assigned(c)) continue;
+            if (!keep(c)) continue;
             if (!first) os << ", ";
             first = false;
             os << "{\"id\": " << id << ", ";
@@ -2178,18 +2179,18 @@ void serializeLayerBody_(const Layer& L, std::ostringstream& os,
         os << fieldPad << "\"kind\": \"midi_cc\",\n";
     if (L.kind == LayerKind::Uad)
         os << fieldPad << "\"kind\": \"uad\",\n";
-    if (!L.uadQuick2.empty() || !L.uadColours.empty()) {
+    if (!L.uadQuick2.empty() || !L.uadLeds.empty()) {
         os << fieldPad << "\"uad\": {\"quick2\": [";
         for (std::size_t i = 0; i < L.uadQuick2.size(); ++i) {
             if (i) os << ", ";
             appendEscaped(os, L.uadQuick2[i]);
         }
-        os << "], \"colours\": [";
+        os << "], \"leds\": [";
         bool first = true;
-        for (const auto& [id, col] : L.uadColours) {
+        for (const auto& [id, look] : L.uadLeds) {
             if (!first) os << ", ";
             first = false;
-            os << "{\"id\": " << id << ", \"col\": " << col << "}";
+            os << "{\"id\": " << id << ", \"led\": " << ledlook::toJson(look) << "}";
         }
         os << "]},\n";
     }
@@ -3197,6 +3198,18 @@ void parseCcLayer_(wdl_json_element* o, midicc::Layer& out)
                 return std::strcmp(t, "true") == 0 || std::strcmp(t, "1") == 0;
         return def;
     };
+    // The lamp: "led" (LedLook), or from before it a palette index "col".
+    auto readLed = [&](wdl_json_element* co, midicc::Control& c) {
+        if (auto* l = co->get_item_by_name("led"); l && l->is_object()) {
+            c.led.activeRgb   = ledlook::hexRgb(l->get_string_by_name("a"), c.led.activeRgb);
+            c.led.inactiveRgb = ledlook::hexRgb(l->get_string_by_name("i"), c.led.inactiveRgb);
+            c.led.activeBri   = ledlook::clampBri(num(l, "ab", c.led.activeBri));
+            c.led.inactiveBri = ledlook::clampBri(num(l, "ib", c.led.inactiveBri));
+            c.led.showWhenEmpty = flag(l, "e", c.led.showWhenEmpty);
+        } else if (co->get_item_by_name("col")) {
+            midicc::setColour(c, num(co, "col", 0));
+        }
+    };
     if (auto* a = o->get_item_by_name("outputs"); a && a->is_array() && a->m_array) {
         out.outputs.clear();
         for (int i = 0; i < a->m_array->GetSize(); ++i)
@@ -3216,7 +3229,7 @@ void parseCcLayer_(wdl_json_element* o, midicc::Layer& out)
                 c.behaviour = std::strcmp(t, "hold") == 0 ? midicc::Behaviour::Hold : midicc::Behaviour::Toggle;
         if (auto* v = co->get_item_by_name("name"))
             if (auto* t = v->get_string_value()) c.name = t;
-        c.colour  = num(co, "col", c.colour);
+        readLed(co, c);
     };
     if (auto* a = o->get_item_by_name("keys"); a && a->is_array() && a->m_array) {
         out.keys.clear();
@@ -3227,7 +3240,7 @@ void parseCcLayer_(wdl_json_element* o, midicc::Layer& out)
             if (!midicc::keyAssignable(id)) continue;
             midicc::Control c;
             readCtl(co, c);
-            if (midicc::assigned(c)) out.keys[id] = c;
+            if (midicc::assigned(c) || c.led.showWhenEmpty) out.keys[id] = c;
         }
     }
     if (auto* e = o->get_item_by_name("encoder"); e && e->is_object()) readCtl(e, out.encoder);
@@ -3258,7 +3271,7 @@ void parseCcLayer_(wdl_json_element* o, midicc::Layer& out)
                             ? midicc::Behaviour::Hold : midicc::Behaviour::Toggle;
                 if (auto* v = co->get_item_by_name("name"))
                     if (auto* t = v->get_string_value()) c.name = t;
-                c.colour  = num(co, "col", c.colour);
+                readLed(co, c);
             }
         }
     }
@@ -3301,8 +3314,8 @@ bool parseLayer_(wdl_json_element* lobj, Layer& out)
             for (int i = 0; q->enum_item(i); ++i)
                 if (const char* s = q->enum_item(i)->get_string_value()) out.uadQuick2.emplace_back(s);
         }
+        // "leds": LedLook per key; "colours" (03.11.2026, a palette index) is read once.
         if (auto* q = v->get_item_by_name("colours"); q && q->is_array()) {
-            out.uadColours.clear();
             for (int i = 0; q->enum_item(i); ++i) {
                 wdl_json_element* e = q->enum_item(i);
                 if (!e || !e->is_object()) continue;
@@ -3310,7 +3323,27 @@ bool parseLayer_(wdl_json_element* lobj, Layer& out)
                 const char* col = e->get_string_by_name("col", true);
                 if (!id || !col) continue;
                 const int k = std::atoi(id), c = std::atoi(col);
-                if (k >= 0 && k < 128 && c >= 0 && c < 8) out.uadColours[k] = c;
+                if (k >= 0 && k < 128 && c >= 0 && c < midicc::kColourCount)
+                    out.uadLeds[k] = ledlook::fromColour(midicc::kColours[c]);
+            }
+        }
+        if (auto* q = v->get_item_by_name("leds"); q && q->is_array()) {
+            out.uadLeds.clear();
+            for (int i = 0; q->enum_item(i); ++i) {
+                wdl_json_element* e = q->enum_item(i);
+                if (!e || !e->is_object()) continue;
+                const char* id = e->get_string_by_name("id", true);
+                wdl_json_element* l = e->get_item_by_name("led");
+                if (!id || !l || !l->is_object()) continue;
+                const int k = std::atoi(id);
+                if (k < 0 || k > 127) continue;
+                ledlook::Look look;
+                look.activeRgb   = ledlook::hexRgb(l->get_string_by_name("a"), look.activeRgb);
+                look.inactiveRgb = ledlook::hexRgb(l->get_string_by_name("i"), look.inactiveRgb);
+                if (const char* t = l->get_string_by_name("ab", true)) look.activeBri = ledlook::clampBri(std::atoi(t));
+                if (const char* t = l->get_string_by_name("ib", true)) look.inactiveBri = ledlook::clampBri(std::atoi(t));
+                if (const char* t = l->get_string_by_name("e", true)) look.showWhenEmpty = !std::strcmp(t, "true");
+                out.uadLeds[k] = look;
             }
         }
     }
@@ -10217,20 +10250,20 @@ void setUadQuick2(int layer, const std::vector<std::string>& ids)
     persistLocked_();
 }
 
-std::map<int, int> uadColours(int layer)
+std::map<int, ledlook::Look> uadLeds(int layer)
 {
     if (layer < 0 || layer > 2) return {};
     std::lock_guard<std::mutex> lk(g_cfgMutex);
-    return g_cfg.layers[layer].uadColours;
+    return g_cfg.layers[layer].uadLeds;
 }
 
-void setUadColour(int layer, int keyId, int colour)
+void setUadLed(int layer, int keyId, const ledlook::Look* look)
 {
     if (layer < 0 || layer > 2 || keyId < 0 || keyId > 127) return;
     std::lock_guard<std::mutex> lk(g_cfgMutex);
-    auto& m = g_cfg.layers[layer].uadColours;
-    if (colour < 0) { if (!m.erase(keyId)) return; }
-    else { auto it = m.find(keyId); if (it != m.end() && it->second == colour) return; m[keyId] = colour; }
+    auto& m = g_cfg.layers[layer].uadLeds;
+    if (!look) { if (!m.erase(keyId)) return; }
+    else { auto it = m.find(keyId); if (it != m.end() && it->second == *look) return; m[keyId] = *look; }
     persistLocked_();
 }
 

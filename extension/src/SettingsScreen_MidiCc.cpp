@@ -18,12 +18,14 @@
 
 #include "Bindings.h"
 #include "MidiCcLayer.h"
+#include "Protocol.h"
 #include "UadClient.h"
 #include "reaper_imgui_functions.h"
 #include "reaper_plugin_functions.h"
 
 int reasixty_ccInputStatus();   // main.cpp: 0 none, 1 open, 2 not found, 3 busy
 uadside::Status reasixty_uadStatus();   // main.cpp: the UAD Console layer's connection
+bool reasixty_drawLedLook(ImGui_Context* ctx, ledlook::Look& l, const char* tag);   // below, shared with the UAD page
 
 namespace {
 
@@ -299,24 +301,6 @@ bool channelRow_(ImGui_Context* ctx, midicc::Control& c, int defaultChannel)
     return dirty;
 }
 
-bool colourRow_(ImGui_Context* ctx, midicc::Control& c, const char* where)
-{
-    bool dirty = false;
-    ImGui_Text(ctx, "Colour");
-    tip_(ctx, where);
-    for (int i = 0; i < midicc::kColourCount; ++i) {
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        char id[32];
-        snprintf(id, sizeof(id), "##cc_col_%d", i);
-        int flags = 0;
-        double w = (i == c.colour) ? 30.0 : 22.0, h = w;
-        if (ImGui_ColorButton(ctx, id, rgba_(midicc::kColours[i], 0xFF), &flags, &w, &h)) {
-            c.colour = i;
-            dirty = true;
-        }
-    }
-    return dirty;
-}
 
 // The editor of one of the other keys (s_kind 100, s_index = UF8 id) or the
 // channel encoder (s_kind 101): the same on every page.
@@ -364,11 +348,15 @@ bool drawExtraEditor_(ImGui_Context* ctx, midicc::Layer& L)
         ImGui_PopItemWidth(ctx);
         tip_(ctx, "8 characters, for Settings. Empty = the CC number.");
     }
-    if (!enc && midicc::keyHasLamp(s_index))
-        dirty |= colourRow_(ctx, c, "The key's lamp, bright while its value is on.");
-    else if (!enc)
-        ImGui_TextDisabled(ctx, "Colour: this key has no lamp on the UF8.");
-    if (!enc && !midicc::assigned(c) && c.name.empty()) L.keys.erase(s_index);
+    if (!enc && midicc::keyHasLamp(s_index)) {
+        ImGui_Spacing(ctx);
+        dirty |= reasixty_drawLedLook(ctx, c.led, "ccx");
+        ImGui_TextDisabled(ctx, "Active = value on, Inactive = value off.");
+    } else if (!enc) {
+        ImGui_TextDisabled(ctx, "LED: this key has no lamp on the UF8.");
+    }
+    if (!enc && !midicc::assigned(c) && c.name.empty() && c.led == ledlook::fromColour(0xFF0000))
+        L.keys.erase(s_index);
     return dirty;
 }
 
@@ -451,12 +439,14 @@ bool drawControlEditor_(ImGui_Context* ctx, midicc::Layer& L, int page)
 
     // Only where the UF8 has a lamp for it (midicc::hasColour).
     if (!midicc::hasColour(k)) {
-        ImGui_TextDisabled(ctx, "Colour: no lamp on the UF8 for this control.");
+        ImGui_TextDisabled(ctx, "LED: no lamp on the UF8 for this control.");
         return dirty;
     }
-    dirty |= colourRow_(ctx, c, k == Kind::Fader ? "On SEL and the colour bar."
-                              : k == Kind::VPot ? "On SEL and the colour bar while FLIP puts the V-Pot on the fader."
-                                                : "The key's lamp, bright while its value is on.");
+    ImGui_Spacing(ctx);
+    dirty |= reasixty_drawLedLook(ctx, c.led, "ccp");
+    ImGui_TextDisabled(ctx, k == Kind::Fader ? "Shown on SEL and the colour bar (Active colour)."
+                          : k == Kind::VPot ? "Shown on SEL and the colour bar while FLIP puts the V-Pot on the fader."
+                                            : "Active = value on, Inactive = value off.");
     return dirty;
 }
 
@@ -466,6 +456,62 @@ bool drawControlEditor_(ImGui_Context* ctx, midicc::Layer& L, int page)
 // control the editor below shows: kind 0..5 = midicc::Kind on the page, 100 = one
 // of the other keys (index = UF8 id), 101 = the channel encoder.
 void reasixty_ccSelect(int kind, int index) { s_kind = kind; s_index = index; }
+
+// The REAPER layer's LED block (SettingsScreen.cpp, drawLedRow) for a LedLook:
+// Active and Inactive, each a colour from the SSL palette (click the swatch)
+// and Off / Dim / Bright; then "Show LED even when no action is assigned".
+bool reasixty_drawLedLook(ImGui_Context* ctx, ledlook::Look& l, const char* tag)
+{
+    bool dirty = false;
+    auto row = [&](const char* label, std::uint32_t& rgb, int& bri, const char* part) {
+        ImGui_AlignTextToFramePadding(ctx);
+        ImGui_Text(ctx, label);
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        ImGui_SetCursorPosX(ctx, 80.0);
+        char btnId[48], popId[48];
+        snprintf(btnId, sizeof(btnId), "##ledcur_%s_%s", tag, part);
+        snprintf(popId, sizeof(popId), "ledpal_%s_%s", tag, part);
+        int flags = 0;
+        double bw = 56.0, bh = 22.0;
+        if (ImGui_ColorButton(ctx, btnId, static_cast<int>((rgb << 8) | 0xFF), &flags, &bw, &bh))
+            ImGui_OpenPopup(ctx, popId, nullptr);
+        if (ImGui_BeginPopup(ctx, popId, nullptr)) {
+            int n = 0;
+            const uf8::PaletteRgb* pal = uf8::selPaletteRgb(&n);
+            for (int i = 0; i < n; ++i) {
+                const std::uint32_t c = (std::uint32_t(pal[i].r) << 16) | (std::uint32_t(pal[i].g) << 8) | pal[i].b;
+                char sw[48];
+                snprintf(sw, sizeof(sw), "##ledsw_%s_%s_%d", tag, part, i);
+                int f = 0;
+                double w = 26.0, h = 26.0;
+                if (ImGui_ColorButton(ctx, sw, static_cast<int>((c << 8) | 0xFF), &f, &w, &h)) {
+                    rgb = c;
+                    dirty = true;
+                    ImGui_CloseCurrentPopup(ctx);
+                }
+                if ((i % 5) != 4 && i != n - 1) ImGui_SameLine(ctx, nullptr, nullptr);
+            }
+            ImGui_EndPopup(ctx);
+        }
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        ImGui_Text(ctx, "  ");
+        static const char* const names[3] = {"Off", "Dim", "Bright"};
+        for (int i = 0; i < 3; ++i) {
+            ImGui_SameLine(ctx, nullptr, nullptr);
+            char id[48];
+            snprintf(id, sizeof(id), "%s##ledb_%s_%s_%d", names[i], tag, part, i);
+            if (ImGui_RadioButton(ctx, id, bri == i)) { bri = i; dirty = true; }
+        }
+    };
+    ImGui_Text(ctx, "LED");
+    row("Active", l.activeRgb, l.activeBri, "a");
+    row("Inactive", l.inactiveRgb, l.inactiveBri, "i");
+    char cb[64];
+    snprintf(cb, sizeof(cb), "Show LED even when no action is assigned##ledforce_%s", tag);
+    bool en = l.showWhenEmpty;
+    if (ImGui_Checkbox(ctx, cb, &en)) { l.showWhenEmpty = en; dirty = true; }
+    return dirty;
+}
 bool reasixty_ccIsSelected(int kind, int index) { return s_kind == kind && s_index == index; }
 
 // The row above the UF8 schematic: which layer is edited, and what it drives.
@@ -564,15 +610,22 @@ namespace { int s_editPage = 0; int s_lastLive = -1; bool s_test = false; }
 
 void reasixty_ccSetEditPage(int p) { s_editPage = std::clamp(p, 0, midicc::kPages - 1); }
 
+// The page Settings shows and the mode, before the picture is drawn: the page
+// the UF8 is on, unless a tab or a page key in the picture picked another one.
+int reasixty_ccEditPageFor(int livePage, bool* test)
+{
+    if (livePage != s_lastLive) { s_editPage = livePage; s_lastLive = livePage; }
+    s_editPage = std::clamp(s_editPage, 0, midicc::kPages - 1);
+    if (test) *test = s_test;
+    return s_editPage;
+}
+
 int drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test)
 {
     midicc::Layer L = bnd::ccLayer(layer);
     bool dirty = false;
-    // The page the UF8 is on, unless a tab here picks another one.
-    if (livePage != s_lastLive) { s_editPage = livePage; s_lastLive = livePage; }
-    s_editPage = std::clamp(s_editPage, 0, midicc::kPages - 1);
+    reasixty_ccEditPageFor(livePage, nullptr);
 
-    ImGui_Spacing(ctx);
     dirty |= drawPresets_(ctx, layer, L);
 
     ImGui_Text(ctx, "Mode");
@@ -582,6 +635,18 @@ int drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test)
     ImGui_SameLine(ctx, nullptr, nullptr);
     if (ImGui_RadioButtonEx(ctx, "Test: clicks and drags send MIDI##cc_mode_t", &mode, 1)) s_test = true;
     *test = s_test;
+    if (s_test && layer != bnd::ccLayerActiveIndex()) {
+        ImGui_PushStyleColor(ctx, ImGui_Col_Text, 0xE0A040FF);
+        ImGui_Text(ctx, "This layer is not the active one, so nothing is sent.");
+        ImGui_PopStyleColor(ctx, nullptr);
+        char b[48];
+        snprintf(b, sizeof(b), "Switch to layer %d##cc_virt_go", layer + 1);
+        if (ImGui_Button(ctx, b, nullptr, nullptr)) {
+            const bnd::ButtonId ids[3] = {bnd::ButtonId::Layer1, bnd::ButtonId::Layer2, bnd::ButtonId::Layer3};
+            bnd::dispatch(ids[layer], true);
+            bnd::dispatch(ids[layer], false);
+        }
+    }
 
     // Connections: set once, folded away, summarised in the header.
     {
@@ -623,8 +688,10 @@ int drawUf8CcHeader(ImGui_Context* ctx, int layer, int livePage, bool* test)
         ImGui_PopItemWidth(ctx);
         tip_(ctx, "A name for this page, e.g. 'Strings'. Settings only.");
     }
-    ImGui_TextDisabled(ctx, "Green: sends a CC.  Dim: no CC, the key keeps its normal job.  Grey: fixed (layers, 360, pages).  "
-                            "Soft-keys, V-Pots, pushes, SEND/PLUG-IN, faders and feet are per page; every other key and the encoder are the same on all pages.");
+    ImGui_TextDisabled(ctx, "Coloured: sends a CC.  Dim: no CC, normal job.");
+    ImGui_TextDisabled(ctx, "Grey: fixed (layers, 360, pages).");
+    ImGui_TextDisabled(ctx, "Per page: soft-keys, V-Pots, SEND/PLUG-IN, faders, feet.");
+    ImGui_TextDisabled(ctx, "All pages: every other key and the encoder.");
     if (dirty) bnd::setCcLayer(layer, L);
     return s_editPage;
 }
