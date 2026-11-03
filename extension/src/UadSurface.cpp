@@ -613,6 +613,12 @@ void Surface::toggleWindow_(int k, Out& out)
     const bool open = m_.windowOpen(path);
     out.cmds.push_back(uad::command("post", std::string(open ? "/CloseWindow" : "/OpenWindow")
                                     + " {\"type\": \"Plug-In\", \"path\":\"" + path + "\"}"));
+    // Opening also puts its parameters on the V-Pots (Frank 03.11.2026).
+    if (!open && slot_ != k) {
+        slot_ = k;
+        paramPage_ = 0;
+        out.cmds.push_back(uad::get(path));
+    }
 }
 
 void Surface::paint(std::int64_t now, Out& out)

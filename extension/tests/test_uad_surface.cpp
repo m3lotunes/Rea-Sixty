@@ -409,10 +409,11 @@ int main()
             r.surf.service(r.now + 200, o);
             EXPECT(o.cmds.empty());
             r.surf.service(r.now + 600, o);
-            EXPECT(o.cmds.size() == 1 && noNul(o.cmds[0]) ==
+            EXPECT(o.cmds.size() == 2 && noNul(o.cmds[0]) ==
                    "post /OpenWindow {\"type\": \"Plug-In\", \"path\":\"/devices/0/inputs/0/effects/2\"}");
+            EXPECT(r.surf.pluginSlot() == 2);                // opening also shows its parameters
             r.surf.fromUf8(uf8sim::key(0x48 + 2, false), r.now + 700, o);
-            EXPECT(r.surf.pluginSlot() == -1);               // the hold did not open the parameters
+            EXPECT(r.surf.pluginSlot() == 2);                // the release after a hold changes nothing
             // The engine's relay marks it open; the next hold closes it.
             r.model.onMessage("{\"path\": \"/OpenWindow\", \"data\": {\"type\": \"Plug-In\", \"path\": \"/devices/0/inputs/0/effects/2\"}}");
             EXPECT(r.model.windowOpen("/devices/0/inputs/0/effects/2"));
