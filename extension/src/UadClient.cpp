@@ -306,6 +306,8 @@ Status Side::status()
         const uad::Output& mon = D.outputs[static_cast<std::size_t>(o)];
         st.hasMonitor   = true;
         st.monitorMute  = mon.mute;
+        st.monitorDim   = mon.dimOn;
+        st.monitorMono  = mon.mixToMono;
         st.monitorDb    = mon.monitorDb;
         st.monitorMinDb = mon.monitorMinDb;
         st.monitorMaxDb = mon.monitorMaxDb;

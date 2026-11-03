@@ -2598,8 +2598,46 @@ void drawUf8UadVector(ImGui_Context* ctx)
                       : "UAD Console: no channels yet (is UAD Console running?)");
     if (nCh > 0) {
         const float gap = 4.0f;
-        const float cw = std::min(66.0f, (W - 16.0f - gap * (nCh - 1)) / nCh);
+        // The master (monitor) section sits at the right end, as in Console.
+        constexpr float kMasterW = 84.0f;
+        const float cw = std::min(66.0f, (W - 16.0f - kMasterW - gap * nCh) / nCh);
         const float chH = 250.0f;
+        if (st.hasMonitor) {
+            const float mx0 = W - 8.0f - kMasterW, mmid = mx0 + kMasterW / 2.0f;
+            rect_(c, mx0, cy0, kMasterW, chH, 0x20242CFF, 0x6FA86FFF, 3.0);
+            ImGui_PushFont(ctx, nullptr, 10.0);
+            drawTextCentered_(c, mmid, cy0 + 10, 0xE0E4EAFF, "MONITOR");
+            const float kx = mmid, ky = cy0 + 62, kr = 28.0f;
+            const bool kHot = inside(kx - kr, ky - kr, 2 * kr, 2 * kr);
+            if (kHot && canvasClicked && leftBtn == 0) { s_dragPot = 8; s_potY = my; s_potTurned = false; }
+            circle_(c, kx, ky, kr, 0x14181EFF,
+                    s_dragPot == 8 ? 0xAACCFFFF : kHot ? 0x6688AAFF : 0x6FA86FFF);
+            circle_(c, kx, ky, kr * 0.78f, 0x383C44FF, 0x6A6E78FF);
+            float a = 0.0f;
+            if (st.monitorMaxDb > st.monitorMinDb) {
+                const double t = (std::clamp(st.monitorDb, st.monitorMinDb, st.monitorMaxDb) - st.monitorMinDb)
+                               / (st.monitorMaxDb - st.monitorMinDb);
+                a = (static_cast<float>(t) * 2.0f - 1.0f) * 2.356f;
+            }
+            line_(c, kx + std::sin(a) * kr * 0.55f, ky - std::cos(a) * kr * 0.55f,
+                  kx + std::sin(a) * kr * 0.95f, ky - std::cos(a) * kr * 0.95f, 0xE0E0E0FF, 2.5);
+            char mv[24];
+            snprintf(mv, sizeof(mv), "%.1f dB", st.monitorDb);
+            drawTextCentered_(c, mmid, ky + kr + 12, 0xC8B070FF, mv);
+            const char* const lbl[3] = {"MUTE", "DIM", "MONO"};
+            const bool on[3] = {st.monitorMute, st.monitorDim, st.monitorMono};
+            const std::uint32_t onCol[3] = {0xB04040FF, 0xC0A030FF, 0x4477CCFF};
+            for (int b = 0; b < 3; ++b) {
+                const float by = cy0 + 130 + b * 22.0f;
+                rect_(c, mx0 + 12, by, kMasterW - 24, 16, on[b] ? onCol[b] : 0x252A33FF, 0x4A5060FF, 2.0);
+                drawTextCentered_(c, mmid, by + 8, 0xD0D4DAFF, lbl[b]);
+            }
+            ImGui_PopFont(ctx);
+            if (kHot) {
+                hoverDesc = "Monitor level (the CHANNEL encoder): drag up/down = level, click = mute";
+                if (canvasClicked && leftBtn == 0) { s_selKey = -40; s_selDesc = hoverDesc; }
+            }
+        }
         for (int k = 0; k < nCh; ++k) {
             const uadside::Status::Channel& ch = st.list[static_cast<std::size_t>(k)];
             const float x = 8.0f + k * (cw + gap);

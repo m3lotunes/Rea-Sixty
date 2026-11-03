@@ -91,7 +91,7 @@ struct Status {
         double sendDb = -144.0, sendTapered = 0.0;
     };
     // The monitor output the CHANNEL encoder turns (first device that has one).
-    bool   hasMonitor = false, monitorMute = false;
+    bool   hasMonitor = false, monitorMute = false, monitorDim = false, monitorMono = false;
     double monitorDb = -96.0, monitorMinDb = -96.0, monitorMaxDb = 0.0;
     std::vector<Channel> list;
     std::uint32_t sent = 0;            // set commands sent to the engine so far
