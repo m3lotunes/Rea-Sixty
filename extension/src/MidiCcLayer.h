@@ -125,10 +125,11 @@ inline bool keyAssignable(int id)
 }
 
 // Whether the key has its own RGB lamp on the UF8 (so its Control::colour shows).
-// SOLO / CUT / SEL have fixed lamp colours, ENC PUSH has none.
+// ENC PUSH has none.
 inline bool keyHasLamp(int id)
 {
-    return (id >= 0x43 && id <= 0x45) || id == 0x50 || id == 0x51 || id == 0x54
+    return (id >= 0x20 && id <= 0x37)                            // SOLO / CUT / SEL
+        || (id >= 0x43 && id <= 0x45) || id == 0x50 || id == 0x51 || id == 0x54
         || (id >= 0x58 && id <= 0x5D) || (id >= 0x6E && id <= 0x75)
         || id == 0x78 || id == 0x79 || (id >= 0x7A && id <= 0x7E);
 }

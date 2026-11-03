@@ -50,6 +50,8 @@ struct View {
     std::uint32_t selRgb    = 0xFFFFFF;
     bool          cut       = false;
     bool          solo      = false;
+    std::uint32_t cutRgb    = 0;          // 0 = the lamp's own colour
+    std::uint32_t soloRgb   = 0;
     bool          drive     = false;      // the fader has a value to go to
     std::uint16_t faderPb   = 0;
     std::uint16_t ring      = 0;          // uf8::vpotPos*
@@ -113,21 +115,29 @@ bool paintStrip(Cells c, const View& v, std::uint8_t st, bool touched, bool& eng
                           : v.topKey == 1 ? uf8::TopSoftKeyState::Dim : uf8::TopSoftKeyState::Off,
             uf8::ledColourForTrackRgb(v.topKeyRgb)));
     }
-    const std::int8_t sel = v.sel ? 1 : 0;
+    // The cache holds on/off and a 6-bit hash of the colour, so a new colour
+    // is sent too, not only a new state.
+    auto key = [](bool on, std::uint32_t rgb) {
+        const std::uint32_t h = rgb ? (((rgb >> 18) ^ (rgb >> 12) ^ (rgb >> 6) ^ rgb) & 0x3F) : 0;
+        return static_cast<std::int8_t>((on ? 1 : 0) | (h << 1));
+    };
+    const std::int8_t sel = key(v.sel, v.selRgb);
     if (c.sel != sel) {
         c.sel = sel;
         leds(uf8::buildLedColourPair(st, uf8::LedClass::Sel, v.sel,
                                      uf8::ledColourForTrackRgb(v.selRgb)));
     }
-    const std::int8_t cut = v.cut ? 1 : 0;
+    const std::int8_t cut = key(v.cut, v.cutRgb);
     if (c.cut != cut) {
         c.cut = cut;
-        leds(uf8::buildLedColourPair(st, uf8::LedClass::Cut, v.cut));
+        leds(v.cutRgb ? uf8::buildLedColourPair(st, uf8::LedClass::Cut, v.cut, uf8::ledColourForTrackRgb(v.cutRgb))
+                      : uf8::buildLedColourPair(st, uf8::LedClass::Cut, v.cut));
     }
-    const std::int8_t solo = v.solo ? 1 : 0;
+    const std::int8_t solo = key(v.solo, v.soloRgb);
     if (c.solo != solo) {
         c.solo = solo;
-        leds(uf8::buildLedColourPair(st, uf8::LedClass::Solo, v.solo));
+        leds(v.soloRgb ? uf8::buildLedColourPair(st, uf8::LedClass::Solo, v.solo, uf8::ledColourForTrackRgb(v.soloRgb))
+                       : uf8::buildLedColourPair(st, uf8::LedClass::Solo, v.solo));
     }
     // Motor: a limp strip takes the bit-7 echo first, then the enable, or the
     // firmware drops the position (uf8fader::drive).

@@ -96,91 +96,91 @@ void setOutput_(midicc::Layer& L, const std::string& name, bool on)
 bool drawConnections_(ImGui_Context* ctx, int layer, midicc::Layer& L)
 {
     bool dirty = false;
+    constexpr double kLabelW = 170.0, kFieldW = 360.0;
+    auto row = [&](const char* label, const char* tip) {
+        ImGui_AlignTextToFramePadding(ctx);
+        ImGui_Text(ctx, label);
+        tip_(ctx, tip);
+        double x = kLabelW;
+        ImGui_SameLine(ctx, &x, nullptr);
+        ImGui_SetNextItemWidth(ctx, kFieldW);
+    };
 
-    ImGui_Text(ctx, "Send to");
-    ImGui_SameLine(ctx, nullptr, nullptr);
-    {
+    // Send to: several outputs, picked in one dropdown.
+    const std::vector<std::string> outs = outputNames_();
+    std::string preview;
+    for (const auto& o : L.outputs) {
+        const bool off = !o.empty() && std::find(outs.begin(), outs.end(), o) == outs.end();
+        preview += (preview.empty() ? "" : ", ") + (o.empty() ? std::string("REAPER") : o) + (off ? " (offline)" : "");
+    }
+    if (preview.empty()) preview = "(nothing)";
+    row("Send to", "Where the layer's MIDI goes. Pick one or more.");
+    if (ImGui_BeginCombo(ctx, "##cc_out_combo", preview.c_str(), nullptr)) {
         bool v = hasOutput_(L, "");
-        if (ImGui_Checkbox(ctx, "REAPER (virtual MIDI keyboard)##cc_out_vkb", &v)) {
+        if (ImGui_Checkbox(ctx, "REAPER (virtual MIDI keyboard: tracks record it)##cc_out_vkb", &v)) {
             setOutput_(L, "", v);
             dirty = true;
         }
-        tip_(ctx, "Tracks whose input is the virtual MIDI keyboard receive and record it.");
-    }
-    const std::vector<std::string> outs = outputNames_();
-    for (size_t i = 0; i < outs.size(); ++i) {
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        char id[300];
-        snprintf(id, sizeof(id), "%s##cc_out_%d", outs[i].c_str(), int(i));
-        bool v = hasOutput_(L, outs[i]);
-        if (ImGui_Checkbox(ctx, id, &v)) { setOutput_(L, outs[i], v); dirty = true; }
-    }
-    // A chosen device that is not plugged in stays chosen, and says so.
-    for (size_t i = 0; i < L.outputs.size(); ++i) {
-        const std::string& o = L.outputs[i];
-        if (o.empty() || std::find(outs.begin(), outs.end(), o) != outs.end()) continue;
-        ImGui_SameLine(ctx, nullptr, nullptr);
-        char id[320];
-        snprintf(id, sizeof(id), "%s (offline)##cc_out_off_%d", o.c_str(), int(i));
-        bool v = true;
-        if (ImGui_Checkbox(ctx, id, &v) && !v) { setOutput_(L, o, false); dirty = true; break; }
+        for (size_t i = 0; i < outs.size(); ++i) {
+            char id[300];
+            snprintf(id, sizeof(id), "%s##cc_out_%d", outs[i].c_str(), int(i));
+            bool on = hasOutput_(L, outs[i]);
+            if (ImGui_Checkbox(ctx, id, &on)) { setOutput_(L, outs[i], on); dirty = true; }
+        }
+        for (size_t i = 0; i < L.outputs.size(); ++i) {   // chosen, but not plugged in
+            const std::string& o = L.outputs[i];
+            if (o.empty() || std::find(outs.begin(), outs.end(), o) != outs.end()) continue;
+            char id[320];
+            snprintf(id, sizeof(id), "%s (offline)##cc_out_off_%d", o.c_str(), int(i));
+            bool on = true;
+            if (ImGui_Checkbox(ctx, id, &on) && !on) { setOutput_(L, o, false); dirty = true; break; }
+        }
+        ImGui_EndCombo(ctx);
     }
 
-    ImGui_Text(ctx, "Values from device");
-    ImGui_SameLine(ctx, nullptr, nullptr);
-    ImGui_SetNextItemWidth(ctx, 260.0);
+    // Values from a device: one input.
+    row("Values from device", "A synth or controller that reports its knobs back. The faders follow it.");
     {
         const std::string cur = L.inputDevice.empty() ? std::string("(none)") : L.inputDevice;
         if (ImGui_BeginCombo(ctx, "##cc_input", cur.c_str(), nullptr)) {
             bool sel = L.inputDevice.empty();
-            if (ImGui_Selectable(ctx, "(none)##cc_in_none", &sel, nullptr, nullptr, nullptr)) {
-                L.inputDevice.clear();
-                dirty = true;
-            }
+            if (ImGui_Selectable(ctx, "(none)##cc_in_none", &sel, nullptr, nullptr, nullptr)) { L.inputDevice.clear(); dirty = true; }
             const std::vector<std::string> ins = inputNames_();
             for (size_t i = 0; i < ins.size(); ++i) {
                 char id[300];
                 snprintf(id, sizeof(id), "%s##cc_in_%d", ins[i].c_str(), int(i));
-                bool s = (L.inputDevice == ins[i]);
-                if (ImGui_Selectable(ctx, id, &s, nullptr, nullptr, nullptr)) {
-                    L.inputDevice = ins[i];
-                    dirty = true;
-                }
+                bool on = (L.inputDevice == ins[i]);
+                if (ImGui_Selectable(ctx, id, &on, nullptr, nullptr, nullptr)) { L.inputDevice = ins[i]; dirty = true; }
             }
             ImGui_EndCombo(ctx);
         }
-        tip_(ctx, "Where the hardware reports its controls back. The faders follow it.");
-        // How the device answered (only for the layer the UF8 is on).
         if (!L.inputDevice.empty() && layer == bnd::ccLayerActiveIndex()) {
             const int st = reasixty_ccInputStatus();
             if (st == 2 || st == 3) {
                 ImGui_SameLine(ctx, nullptr, nullptr);
-                ImGui_TextDisabled(ctx, st == 2
-                    ? "Not connected."
-                    : "Device busy. Disable it as input in REAPER's MIDI preferences.");
+                ImGui_TextDisabled(ctx, st == 2 ? "not connected"
+                                                : "busy: disable it as input in REAPER's MIDI preferences");
             }
         }
     }
 
+    // Values from REAPER.
+    ImGui_AlignTextToFramePadding(ctx);
+    ImGui_Text(ctx, "Values from REAPER");
+    tip_(ctx, "While REAPER plays, the faders follow the CC lanes in the selected track's MIDI items.");
     {
+        double x = kLabelW;
+        ImGui_SameLine(ctx, &x, nullptr);
         bool v = L.followItems;
-        if (ImGui_Checkbox(ctx, "Values from REAPER: follow the CC lanes of the selected track##cc_follow", &v)) {
-            L.followItems = v;
-            dirty = true;
-        }
-        tip_(ctx, "Faders follow the CC lanes of the selected track while REAPER plays.");
+        if (ImGui_Checkbox(ctx, "follow the CC lanes of the selected track##cc_follow", &v)) { L.followItems = v; dirty = true; }
     }
 
-    ImGui_Text(ctx, "Default channel");
-    ImGui_SameLine(ctx, nullptr, nullptr);
+    // Default channel.
+    row("Default channel", "Every control sends on this channel unless it has its own.");
     ImGui_SetNextItemWidth(ctx, 110.0);
     {
         int ch = L.defaultChannel;
-        if (ImGui_InputInt(ctx, "##cc_defch", &ch, nullptr, nullptr, nullptr)) {
-            L.defaultChannel = std::clamp(ch, 1, 16);
-            dirty = true;
-        }
-        tip_(ctx, "Every control sends on this channel unless it has its own.");
+        if (ImGui_InputInt(ctx, "##cc_defch", &ch, nullptr, nullptr, nullptr)) { L.defaultChannel = std::clamp(ch, 1, 16); dirty = true; }
     }
     return dirty;
 }
@@ -353,7 +353,7 @@ bool drawExtraEditor_(ImGui_Context* ctx, midicc::Layer& L)
     if (!enc && midicc::keyHasLamp(s_index))
         dirty |= colourRow_(ctx, c, "The key's lamp, bright while its value is on.");
     else if (!enc)
-        ImGui_TextDisabled(ctx, "Colour: this key's lamp has a fixed colour.");
+        ImGui_TextDisabled(ctx, "Colour: this key has no lamp on the UF8.");
     if (!enc && !midicc::assigned(c) && c.name.empty()) L.keys.erase(s_index);
     return dirty;
 }

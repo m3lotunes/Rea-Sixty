@@ -2920,16 +2920,31 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
         return what + b + (ct.name.empty() ? "" : " (" + ct.name + ")");
     };
     // A tile. sel: picked in the editor; lit: its value is on.
+    // rgb: the control's lamp colour (0 = none): dim while off, full while on,
+    // as the UF8 shows it.
+    auto rgba = [](std::uint32_t rgb, double f) {
+        const auto ch = [&](int sh) { return static_cast<std::uint32_t>(std::lround(((rgb >> sh) & 0xFF) * f)) & 0xFF; };
+        return (ch(16) << 24) | (ch(8) << 16) | (ch(0) << 8) | 0xFFu;
+    };
     auto tileDraw = [&](float x, float y, float w, float h, const std::string& label, bool usable,
-                        bool assigned, bool sel, bool lit) {
+                        bool assigned, bool sel, bool lit, std::uint32_t rgb = 0) {
         const bool hot = inside(x, y, w, h);
         uint32_t fill, border, text = 0xD0D4DAFF;
         if (!usable)        { fill = 0x1A1E24FF; border = 0x383C44FF; text = 0x70747CFF; }
+        else if (assigned && rgb) {
+            fill = rgba(rgb, lit ? 0.85 : 0.28);
+            border = sel ? 0xFFFFFFFF : rgba(rgb, 1.0);
+            const int lum = static_cast<int>(((rgb >> 16) & 0xFF) * 3 + ((rgb >> 8) & 0xFF) * 6 + (rgb & 0xFF)) / 10;
+            text = lit && lum > 140 ? 0x101418FF : 0xF0F2F5FF;
+        }
         else if (sel)       { fill = 0x4477CCFF; border = 0xAACCFFFF; text = 0xFFFFFFFF; }
         else if (assigned)  { fill = lit ? 0x3F8A46FF : 0x2C3A2EFF; border = lit ? 0x9FF09FFF : 0x6FA86FFF; }
         else                { fill = 0x20242CFF; border = 0x4A5060FF; text = 0x8890A0FF; }
-        if (hot && usable && !sel) fill = 0x3A4253FF;
+        if (hot && usable && !sel && !(assigned && rgb)) fill = 0x3A4253FF;
         rect_(c, x, y, w, h, fill, border, 3.5);
+        if (sel && assigned && rgb)   // picked: a second, white frame
+            ImGui_DrawList_AddRect(c.dl, c.ox + x - 2, c.oy + y - 2, c.ox + x + w + 2, c.oy + y + h + 2,
+                                   0xFFFFFFFF, nullptr, nullptr, nullptr);
         ImGui_PushFont(ctx, nullptr, 10.0);
         drawTextCentered_(c, x + w / 2.0f, y + h / 2.0f, text, label.c_str());
         ImGui_PopFont(ctx);
@@ -2941,7 +2956,8 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
         const bool on = midicc::assigned(ct);
         const bool lit = on && reasixty_ccValue(static_cast<int>(k), i) >= 64;
         if (tileDraw(x, y, w, h, on ? ctlText(k, ct) : what, true, on,
-                     !s_test && reasixty_ccIsSelected(static_cast<int>(k), i), lit)) {
+                     !s_test && reasixty_ccIsSelected(static_cast<int>(k), i), lit,
+                     on && midicc::hasColour(k) ? midicc::colourRgb(ct) : 0)) {
             hoverDesc = ctlDesc(k, ct, what) + ", this page";
             if (canvasClicked) {
                 if (!s_test) reasixty_ccSelect(static_cast<int>(k), i);
@@ -2956,7 +2972,8 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
         const bool on = usable && it != L.keys.end() && midicc::assigned(it->second);
         const bool lit = on && reasixty_ccKeyValue(id) >= 64;
         const std::string lbl = on && !it->second.name.empty() ? it->second.name : std::string(label);
-        if (tileDraw(x, y, w, h, lbl, usable, on, usable && !s_test && reasixty_ccIsSelected(kSelKey, id), lit)) {
+        if (tileDraw(x, y, w, h, lbl, usable, on, usable && !s_test && reasixty_ccIsSelected(kSelKey, id), lit,
+                     on && midicc::keyHasLamp(id) ? midicc::colourRgb(it->second) : 0)) {
             if (!usable) { hoverDesc = std::string(label) + ": keeps its job, cannot carry a CC"; return; }
             hoverDesc = on ? ctlDesc(Kind::Soft, it->second, midicc::keyName(id)) + ", all pages"
                            : midicc::keyName(id) + ": no CC, keeps its normal job (click to assign)";
@@ -2988,7 +3005,7 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
             else if (send) { s_pot = i; s_potY = my; s_potTurned = false; }
         }
         circle_(c, mid, vy, 18, 0x14181EFF, vSel ? 0xAACCFFFF : (s_pot == i || vHot) ? 0x6688AAFF
-                                            : midicc::assigned(vp) ? 0x6FA86FFF : 0x4A5060FF);
+                                            : midicc::assigned(vp) ? rgba(midicc::colourRgb(vp), 1.0) : 0x4A5060FF);
         circle_(c, mid, vy, 14, 0x2A3038FF, 0x555A66FF);
         const int vv = reasixty_ccValue(static_cast<int>(Kind::VPot), i);
         const int vmax = midicc::maxValue(midicc::hiResActive(Kind::VPot, vp));
@@ -3015,7 +3032,8 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
         const float capY = faderBot - static_cast<float>(pb) / midicc::kFaderPbMax * (faderBot - faderTop);
         const bool fHot = inside(mid - 14, faderTop - 8, 28, faderBot - faderTop + 16);
         const bool fSel = !s_test && reasixty_ccIsSelected(static_cast<int>(Kind::Fader), i);
-        rect_(c, mid - 12, capY - 6, 24, 12, fSel ? 0x4477CCFF : midicc::assigned(fd) ? (s_fader == i ? 0x88AAEEFF : 0x6A7080FF) : 0x2A2E36FF,
+        rect_(c, mid - 12, capY - 6, 24, 12,
+              fSel ? 0x4477CCFF : midicc::assigned(fd) ? (s_fader == i ? 0x88AAEEFF : rgba(midicc::colourRgb(fd), 0.75)) : 0x2A2E36FF,
               fSel ? 0xAACCFFFF : 0x9CA0AAFF, 2.0);
         if (fHot && canvasClicked) {
             if (!s_test) reasixty_ccSelect(static_cast<int>(Kind::Fader), i);

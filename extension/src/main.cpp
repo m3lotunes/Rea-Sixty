@@ -41264,8 +41264,19 @@ static void ccPaintSurface_()
             v.topKeyRgb = colourRgb(sc);
             v.sel       = fOn;
             v.selRgb    = colourRgb(fc);
-            v.solo      = S.keyLit(0x20 + l * 3);    // SOLO / CUT with their own CC
+            // SOLO / CUT / SEL with their own CC: their colour, lit while on.
+            auto keyCol = [&](int id) -> std::uint32_t {
+                auto it = L.keys.find(id);
+                return it != L.keys.end() && assigned(it->second) ? colourRgb(it->second) : 0;
+            };
+            v.solo      = S.keyLit(0x20 + l * 3);
+            v.soloRgb   = keyCol(0x20 + l * 3);
             v.cut       = S.keyLit(0x21 + l * 3);
+            v.cutRgb    = keyCol(0x21 + l * 3);
+            if (const std::uint32_t sc = keyCol(0x22 + l * 3)) {
+                v.sel    = S.keyLit(0x22 + l * 3);
+                v.selRgb = sc;
+            }
             v.drive     = fOn && fKnown;
             v.faderPb   = v.drive ? static_cast<uint16_t>(valueToFader(fv, hiResActive(fk, fc))) : 0;
             bool engaged = g_faderMotorEngaged[s].load();
