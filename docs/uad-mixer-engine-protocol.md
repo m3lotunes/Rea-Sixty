@@ -137,6 +137,40 @@ Requests have the form `<verb> <path>[ <value>]\0` with verbs `get`, `set`, `sub
 - `replyPath()` returns `"multi"` for batched pushes. We do not send `subscribe mode=multi`, so
   none arrive.
 
+## 7. Official documentation and other projects (searched 03.11.2026)
+
+**Official documentation: none found.**
+- UA's help centre documents Console's use, not port 4710.
+- UA documents Mackie Control setup for **LUNA** only ("MCU Control Surface Setup & Configuration", help.uaudio.com).
+- On UA's forum, users have asked for controller support for Console since at least 2020 ("Controller for Console and Luna, when?", uadforum.com thread 51714).
+- Every project below calls its use of the engine reverse-engineered or unofficial.
+
+**Plug-in inserts** (new findings):
+- **UA Midi Control** gained "Effect Parameters and the Output section (Monitor, CUE, HP)" in a later version; there is also a Windows build in C# (uadforum.com thread 49011, 2020). The GitHub repo is the 2018 version without this.
+- **Tree.** `…/effects/0` under the preamp is the Unison slot; `…/effects/S` are the insert slots, each with `EffectName`, `Preset`, `Power`, `parameters/`.
+  - The parameter nodes exist only once a plug-in is loaded. After `set …/EffectName`, MCP polls up to 5 s for them (MCP PROTOCOL.md, "Known quirks").
+  - MCP's `uad_get_plugin_params` returns names, normalized 0-1 values and "the engine's own display text". `uad_set_plugin_params` sets parameters by name with normalized values (MCP README).
+- **`Power`.** UA's manual: "Power is a soft bypass, equivalent to toggling the power button in the plug-in. This method keeps the plug-in loaded on DSP" (help.uaudio.com, "Using UAD Plug-Ins Manual"). That makes it the safe on/off for a key.
+- **Slot count.** UA documents four standard inserts per channel plus Unison on preamp channels ("UAD Plug-In Inserts"). Our walk of the Twin shows 8 `effects` nodes per input; what the other four are is open.
+- **cearka Stream Deck plug-in** (Windows): toggles all 4 inserts of a channel and, separately, the Unison slot (inputs 0 and 1).
+- **Not found anywhere:**
+  - whether a parameter `subscribe` pushes changes;
+  - how plug-in meters (gain reduction) are exposed. The author of an unreleased iPad Console remote calls metering "a significant challenge" (reddit r/universalaudio, 10/2026).
+
+**Other products on the same interface** (none read in depth):
+
+| Project | What it does |
+|---|---|
+| Softube **Apollo Central** (since 11/2017, commercial) | Console 1 hardware controls Console channels, sends, inserts, plug-in parameters with paging, plug-in and preset loading. Transport not published |
+| **HJF Plugins "UAD Console"** for Stream Deck (commercial) | Channels, cues, monitor, inserts and "full plugin parameters", two-way; rebuilds when plug-ins change. Needs Console 1.3.1+ |
+| **UAD Console Bridge for EUCON** (lindelea, Windows) | Console as an EUCON application for Avid S3 / Avid Control: faders, sends, preamps, loaded plug-ins with names and values |
+| **Lyra** (headroomstudio.dev) | Monitor level from F-keys. Uses "UA Mixer Engine (Apollo) and UA Mixer Helper (Volt)" |
+| **Apollo Monitor** (noiseheroes), **ApolloBot** (jlmitch5), **cuefinger** (franqulator), **apollo-control** (jasonmcaffee, Windows), **UA Remote Control** (iOS/Android, 2024), **ConsoleLink** (iOS) | Monitor, cue and channel remotes |
+
+**Port 4720, "UA Mixer Helper".**
+- Text commands with **UBJSON** binary replies (open-apollo wiki, "Daemon Setup").
+- Lyra drives **Volt** interfaces through it, so a Volt is not reachable on 4710. Rea-Sixty's layer covers Apollos only.
+
 ## Open questions to measure on the user's Mac (all read-only)
 
 1. `get /Version`, `/ProtocolVersion`, `/devices/0/DeviceTypeID`: which engine version ships with UA Connect?
@@ -149,3 +183,7 @@ Requests have the form `<verb> <path>[ <value>]\0` with verbs `get`, `set`, `sub
 8. Is port 4710 bound on all interfaces? **Measured 02.11.2026 on the user's Mac: yes,
    `*:4710`.** Rea-Sixty connects to 127.0.0.1 only.
 9. During fast fader moves, does the engine echo intermediate values back (so an echo hold is needed)?
+10. With a plug-in loaded (e.g. a compressor in insert 1): the parameter count and names, how
+    stepped switches come (`StepValue`?), whether `subscribe …/parameters/N/NormalizedValue`
+    pushes when the plug-in window is used, and what the 8 `effects` nodes are next to the
+    4 inserts.
