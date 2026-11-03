@@ -2642,6 +2642,14 @@ void drawUf8UadVector(ImGui_Context* ctx)
     tile(852, 244, 44, 22, "NAV", "", false);
     tile(898, 244, 44, 22, "NUDGE", "", false);
     tile(944, 244, 41, 22, "FOCUS", "", false);
+    // As on the REAPER layer: the encoder's PUSH / ROTATE row and the zoom pad.
+    tile(852, 270, 65, 18, "PUSH", "monitor mute", true, false, 0x76);
+    tile(919, 270, 66, 18, "ROTATE", "monitor level (drag the encoder above)", false);
+    tile(918 - 17, 406 - 32, 34, 26, "\xE2\x96\xB2", "", false);
+    tile(918 - 54, 406, 34, 26, "\xE2\x97\x80", "", false);
+    tile(918 - 17, 406, 34, 26, "\xE2\x97\x8F", "", false);
+    tile(918 + 20, 406, 34, 26, "\xE2\x96\xB6", "", false);
+    tile(918 - 17, 406 + 32, 34, 26, "\xE2\x96\xBC", "", false);
     groupLabel(917, 300, "BANK");
     {
         char d[64];
@@ -2881,7 +2889,7 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
     }
     const bool send = s_test && live;
 
-    constexpr float W = 1000, H = 400;
+    constexpr float W = 1000, H = 490;
     ImGui_PushFont(ctx, nullptr, 12.0);
     double oxd = 0, oyd = 0;
     ImGui_GetCursorScreenPos(ctx, &oxd, &oyd);
@@ -2989,106 +2997,136 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
         ImGui_PopFont(ctx);
     };
 
-    // ---- the eight strips ----
-    constexpr float kX0 = 140, kSW = 80, kGap = 7;
-    const float faderTop = 258, faderBot = 370;
+    // ---- the eight strips: the REAPER layer's grid (drawUf8Vector) ----
+    constexpr float kX0 = 138, kSW = 80, kGap = 7;
+    const float faderTop = 220, faderBot = 440;
     for (int i = 0; i < midicc::kStrips; ++i) {
         const float sx = kX0 + i * (kSW + kGap), mid = sx + kSW / 2.0f;
-        pageKey(sx + 6, 12, kSW - 12, 22, Kind::Soft, i, "SOFT " + std::to_string(i + 1));
-        // V-Pot: assign = pick, test = drag turns / click pushes.
+        pageKey(sx + 6, 12, kSW - 12, 22, Kind::Soft, i, std::to_string(i + 1));
+        // Scribble: fader, V-Pot and push names, the V-Pot's value.
         const midicc::Control& vp = P.vpot[i];
-        const float vy = 64;
+        const midicc::Control& pu = P.push[i];
+        const midicc::Control& fd = P.fader[i];
+        const int vv = reasixty_ccValue(static_cast<int>(Kind::VPot), i);
+        rect_(c, sx + 4, 40, kSW - 8, 58, 0x080C12FF, 0x444A55FF, 2.0);
+        ImGui_PushFont(ctx, nullptr, 10.0);
+        drawTextCentered_(c, mid, 52, 0x4488DDFF, ctlText(Kind::Fader, fd).c_str());
+        drawTextCentered_(c, mid, 66, 0x8890A0FF, ("V " + ctlText(Kind::VPot, vp)).c_str());
+        drawTextCentered_(c, mid, 78, 0x8890A0FF, ("P " + ctlText(Kind::Push, pu)).c_str());
+        drawTextCentered_(c, mid, 90, 0xC8B070FF, midicc::valueText(vv, vv >= 0).c_str());
+        ImGui_PopFont(ctx);
+        // V-Pot. Edit: a click picks it, a second click its push. Test: drag
+        // turns, a click without a turn is the push.
+        const float vy = 124;
         const bool vHot = inside(mid - 18, vy - 18, 36, 36);
         const bool vSel = !s_test && reasixty_ccIsSelected(static_cast<int>(Kind::VPot), i);
+        const bool pSel = !s_test && reasixty_ccIsSelected(static_cast<int>(Kind::Push), i);
         if (vHot && canvasClicked) {
-            if (!s_test) reasixty_ccSelect(static_cast<int>(Kind::VPot), i);
+            if (!s_test) reasixty_ccSelect(static_cast<int>(vSel ? Kind::Push : Kind::VPot), i);
             else if (send) { s_pot = i; s_potY = my; s_potTurned = false; }
         }
-        circle_(c, mid, vy, 18, 0x14181EFF, vSel ? 0xAACCFFFF : (s_pot == i || vHot) ? 0x6688AAFF
+        circle_(c, mid, vy, 18, 0x14181EFF, (vSel || pSel) ? 0xAACCFFFF : (s_pot == i || vHot) ? 0x6688AAFF
                                             : midicc::assigned(vp) ? rgba(midicc::colourRgb(vp), 1.0) : 0x4A5060FF);
-        circle_(c, mid, vy, 14, 0x2A3038FF, 0x555A66FF);
-        const int vv = reasixty_ccValue(static_cast<int>(Kind::VPot), i);
+        circle_(c, mid, vy, 14, pSel ? 0x4477CCFF : 0x2A3038FF, 0x555A66FF);
         const int vmax = midicc::maxValue(midicc::hiResActive(Kind::VPot, vp));
-        const float a = vv < 0 ? -2.356f : (static_cast<float>(vv) / vmax * 2.0f - 1.0f) * 2.356f;
+        const float a = vv < 0 ? 0.0f : (static_cast<float>(vv) / vmax * 2.0f - 1.0f) * 2.356f;
         line_(c, mid + std::sin(a) * 8.0f, vy - std::cos(a) * 8.0f, mid + std::sin(a) * 16.0f, vy - std::cos(a) * 16.0f,
               midicc::assigned(vp) ? 0xCCCCCCFF : 0x555A66FF, 2.0);
-        ImGui_PushFont(ctx, nullptr, 10.0);
-        drawTextCentered_(c, mid, 92, 0x8890A0FF, ctlText(Kind::VPot, vp).c_str());
-        drawTextCentered_(c, mid, 104, 0xC8B070FF, midicc::valueText(vv, vv >= 0).c_str());
-        ImGui_PopFont(ctx);
-        if (vHot) hoverDesc = ctlDesc(Kind::VPot, vp, "V-Pot " + std::to_string(i + 1))
-                              + (s_test ? " (drag up/down; click = push)" : ", this page");
-        pageKey(sx + 14, 114, kSW - 28, 16, Kind::Push, i, "PUSH");
-        pageKey(sx + 6, 136, kSW - 12, 20, Kind::SendPlugin, i, "S/P " + std::to_string(i + 1));
-        anyKey(sx + 8, 164, kSW - 16, 18, 0x20 + i * 3, "SOLO");
-        anyKey(sx + 8, 186, kSW - 16, 18, 0x21 + i * 3, "CUT");
-        anyKey(sx + 8, 208, kSW - 16, 18, 0x22 + i * 3, "SEL");
-        // Fader.
-        const midicc::Control& fd = P.fader[i];
+        if (vHot) hoverDesc = s_test ? ctlDesc(Kind::VPot, vp, "V-Pot " + std::to_string(i + 1)) + " (drag up/down; click = push)"
+                                     : ctlDesc(Kind::VPot, vp, "V-Pot " + std::to_string(i + 1)) + "; click again: "
+                                       + ctlDesc(Kind::Push, pu, "its push");
+        // SOLO / CUT / SEL.
+        anyKey(sx + 8, 152, kSW - 16, 16, 0x20 + i * 3, "SOLO");
+        anyKey(sx + 8, 172, kSW - 16, 16, 0x21 + i * 3, "CUT");
+        anyKey(sx + 8, 192, kSW - 16, 16, 0x22 + i * 3, "SEL");
+        // Fader, as on the REAPER layer, the cap where the value is.
         const bool hr = midicc::hiResActive(Kind::Fader, fd);
         const int fv = reasixty_ccValue(static_cast<int>(Kind::Fader), i);
         const int pb = s_fader == i ? s_faderPb : (fv < 0 ? 0 : midicc::valueToFader(fv, hr));
+        for (int t = 0; t <= 10; ++t) {
+            const float ty = faderTop + (faderBot - faderTop) * (t / 10.0f);
+            line_(c, mid - 12, ty, mid - 12 + ((t % 5 == 0) ? 6.0f : 3.0f), ty, 0x6A6E78FF, 1.0);
+        }
         rect_(c, mid - 1.5f, faderTop, 3, faderBot - faderTop, 0x444B55FF, 0x000000FF, 1.0);
         const float capY = faderBot - static_cast<float>(pb) / midicc::kFaderPbMax * (faderBot - faderTop);
         const bool fHot = inside(mid - 14, faderTop - 8, 28, faderBot - faderTop + 16);
         const bool fSel = !s_test && reasixty_ccIsSelected(static_cast<int>(Kind::Fader), i);
-        rect_(c, mid - 12, capY - 6, 24, 12,
+        rect_(c, mid - 12, capY - 7, 24, 14,
               fSel ? 0x4477CCFF : midicc::assigned(fd) ? (s_fader == i ? 0x88AAEEFF : rgba(midicc::colourRgb(fd), 0.75)) : 0x2A2E36FF,
-              fSel ? 0xAACCFFFF : 0x9CA0AAFF, 2.0);
+              fSel ? 0xAACCFFFF : 0x9CA0AAFF, 2.5);
+        line_(c, mid - 9, capY, mid + 9, capY, 0xE0E0E0FF, 1.5);
         if (fHot && canvasClicked) {
             if (!s_test) reasixty_ccSelect(static_cast<int>(Kind::Fader), i);
             else if (send && midicc::assigned(fd)) s_fader = i;
         }
         ImGui_PushFont(ctx, nullptr, 10.0);
-        drawTextCentered_(c, mid, 242, 0x8890A0FF, ctlText(Kind::Fader, fd).c_str());
-        drawTextCentered_(c, mid, 382, 0xC8B070FF, midicc::valueText(fv, fv >= 0).c_str());
+        drawTextCentered_(c, mid, 452, 0xC8B070FF, midicc::valueText(fv, fv >= 0).c_str());
         ImGui_PopFont(ctx);
         if (fHot) hoverDesc = ctlDesc(Kind::Fader, fd, "fader " + std::to_string(i + 1)) + (s_test ? " (drag)" : ", this page");
     }
 
-    // ---- left panel ----
-    label(70, 10, "LAYER        QUICK");
+    // ---- left panel (as drawUf8Vector) ----
+    label(33, 8, "LAYER");
+    label(75, 8, "QUICK");
+    const int curLayer = uf8::bindings::getQuickLayer();
     for (int l = 0; l < 3; ++l) {
         char n[4]; snprintf(n, sizeof(n), "%d", l + 1);
-        tileDraw(14, 22 + 24.0f * l, 50, 20, n, false, false, false, false);
-        if (inside(14, 22 + 24.0f * l, 50, 20)) hoverDesc = std::string("LAYER ") + n + ": keeps its job";
-        anyKey(70, 22 + 24.0f * l, 54, 20, 0x43 + l, n);
+        const float y = 22.0f + 26.0f * l;
+        tileDraw(15, y, 36, 22, n, false, false, false, false);
+        if (l == curLayer)
+            ImGui_DrawList_AddRect(c.dl, c.ox + 13, c.oy + y - 2, c.ox + 53, c.oy + y + 24, 0x40C040FF, nullptr, nullptr, nullptr);
+        if (inside(15, y, 36, 22)) hoverDesc = std::string("LAYER ") + n + ": keeps its job";
+        anyKey(57, y, 36, 22, 0x43 + l, n);
     }
-    tileDraw(14, 96, 110, 20, "360", false, false, false, false);
-    label(70, 124, "PAGE");
-    for (int p = 0; p < midicc::kPages; ++p) {
-        const float x = 14.0f + (p % 2) * 56.0f, y = 134.0f + (p / 2) * 22.0f;
-        const bool hot = tileDraw(x, y, 54, 20, midicc::pageKey(p), true, true, p == page, false);
-        if (hot) {
-            hoverDesc = std::string("page ") + midicc::pageKey(p) + " (the soft-key bank key; keeps its job)";
-            if (canvasClicked) reasixty_ccSetEditPage(p);
-        }
-    }
+    tileDraw(15, 108, 78, 24, "360\xC2\xB0", false, false, false, false);
+    if (inside(15, 108, 78, 24)) hoverDesc = "360: keeps its job";
+    label(54, 138, "SEND / PLUGIN");
+    for (int k = 0; k < midicc::kStrips; ++k)
+        pageKey(13.0f + (k % 2) * 42.0f, 152.0f + (k / 2) * 26.0f, 38, 22, Kind::SendPlugin, k, std::to_string(k + 1));
+    anyKey(13, 260, 50, 22, 0x50, "PLUGIN");
+    anyKey(67, 260, 50, 22, 0x51, "CHANNEL");
+    label(65, 286, "PAGE");
     for (int d = 0; d < 2; ++d) {
-        const bool hot = tileDraw(14.0f + d * 56.0f, 202, 54, 20, d ? "PAGE \xE2\x96\xB8" : "\xE2\x97\x82 PAGE", true, true, false, false);
-        if (hot) { hoverDesc = d ? "next page" : "previous page"; if (canvasClicked) reasixty_ccSetEditPage(page + (d ? 1 : -1)); }
+        const float x = d ? 67.0f : 13.0f;
+        const bool hot = tileDraw(x, 300, 50, 22, d ? "\xE2\x96\xB8" : "\xE2\x97\x82", true, true, false, false);
+        if (hot) { hoverDesc = d ? "next page (keeps its job)" : "previous page (keeps its job)";
+                   if (canvasClicked) reasixty_ccSetEditPage(page + (d ? 1 : -1)); }
     }
-    anyKey(14, 230, 54, 20, 0x50, "PLUGIN");
-    anyKey(70, 230, 54, 20, 0x51, "CHANNEL");
-    anyKey(14, 254, 110, 20, 0x54, "FLIP");
-    label(70, 282, "AUTOMATION");
+    anyKey(13, 326, 104, 22, 0x54, "FLIP");
+    label(65, 358, "AUTOMATION");
     {
         const char* an[6] = {"OFF", "READ", "WRITE", "TRIM", "LATCH", "TOUCH"};
-        for (int k = 0; k < 6; ++k) anyKey(14.0f + (k % 3) * 37.0f, 292.0f + (k / 3) * 22.0f, 35, 20, 0x58 + k, an[k]);
+        for (int k = 0; k < 6; ++k) anyKey(13.0f + (k % 3) * 35.0f, 372.0f + (k / 3) * 24.0f, 33, 22, 0x58 + k, an[k]);
     }
-    label(70, 344, "FOOT");
-    pageKey(14, 354, 54, 20, Kind::Foot, 0, "FOOT 1");
-    pageKey(70, 354, 54, 20, Kind::Foot, 1, "FOOT 2");
+    label(65, 428, "FOOT SWITCHES");
+    pageKey(13, 442, 50, 22, Kind::Foot, 0, "FOOT 1");
+    pageKey(67, 442, 50, 22, Kind::Foot, 1, "FOOT 2");
 
-    // ---- right panel ----
-    anyKey(852, 12, 64, 22, 0x6E, "PAN");
-    anyKey(921, 12, 64, 22, 0x6F, "FINE");
-    label(918, 42, "SELECTION MODE");
-    anyKey(852, 52, 43, 20, 0x70, "NORM");
-    anyKey(899, 52, 43, 20, 0x71, "REC");
-    anyKey(946, 52, 39, 20, 0x72, "AUTO");
-    {   // the channel encoder: assign = pick, test = drag turns
-        constexpr float ex = 918, ey = 120, er = 30;
+    // ---- right panel (as drawUf8Vector) ----
+    {   // the soft-key bank keys = the layer's pages
+        struct B { float x, y, w; };
+        const B bk[midicc::kPages] = {{852, 22, 42}, {898, 22, 42}, {944, 22, 41},
+                                      {852, 46, 42}, {898, 46, 42}, {944, 46, 41}};
+        for (int p = 0; p < midicc::kPages; ++p) {
+            const bool hot = tileDraw(bk[p].x, bk[p].y, bk[p].w, 20, midicc::pageKey(p), true, true, p == page, false);
+            if (p == reasixty_ccLivePage() && live)
+                ImGui_DrawList_AddRect(c.dl, c.ox + bk[p].x - 2, c.oy + bk[p].y - 2, c.ox + bk[p].x + bk[p].w + 2,
+                                       c.oy + bk[p].y + 22, 0x40C040FF, nullptr, nullptr, nullptr);
+            if (hot) {
+                hoverDesc = std::string("page ") + midicc::pageKey(p)
+                          + (L.pages[p].name.empty() ? "" : " (" + L.pages[p].name + ")") + "; keeps its job";
+                if (canvasClicked) reasixty_ccSetEditPage(p);
+            }
+        }
+    }
+    anyKey(852, 80, 64, 22, 0x6E, "PAN");
+    anyKey(921, 80, 64, 22, 0x6F, "FINE");
+    label(918, 114, "SELECTION MODE");
+    anyKey(852, 128, 43, 20, 0x70, "NORM");
+    anyKey(899, 128, 43, 20, 0x71, "REC");
+    anyKey(946, 128, 39, 20, 0x72, "AUTO");
+    {   // the channel encoder: edit = pick, test = drag turns
+        constexpr float ex = 918, ey = 200, er = 32;
         const bool eHot = inside(ex - er, ey - er, 2 * er, 2 * er);
         const bool eOn = midicc::assigned(L.encoder);
         const bool eSel = !s_test && reasixty_ccIsSelected(kSelEnc, 0);
@@ -3096,33 +3134,41 @@ void drawUf8CcVirtual(ImGui_Context* ctx, int layer, int editPage, bool testMode
             if (!s_test) reasixty_ccSelect(kSelEnc, 0);
             else if (send && eOn) { s_pot = 8; s_potY = my; s_potTurned = true; }
         }
-        circle_(c, ex, ey, er, 0x14181EFF, eSel ? 0xAACCFFFF : eHot ? 0x6688AAFF : eOn ? 0x6FA86FFF : 0x4A5060FF);
+        circle_(c, ex, ey, er, 0x14181EFF, eSel ? 0xAACCFFFF : eHot ? 0x6688AAFF
+                                         : eOn ? rgba(midicc::colourRgb(L.encoder), 1.0) : 0x6FA86FFF);
+        circle_(c, ex, ey, er - 3, 0x252A33FF, 0x555A66FF);
         circle_(c, ex, ey, er * 0.78f, 0x383C44FF, 0x6A6E78FF);
         const int ev = reasixty_ccEncoderValue();
-        const float a = ev < 0 ? -2.356f : (static_cast<float>(ev) / 127.0f * 2.0f - 1.0f) * 2.356f;
-        line_(c, ex + std::sin(a) * er * 0.6f, ey - std::cos(a) * er * 0.6f, ex + std::sin(a) * er * 0.95f,
+        const float a = ev < 0 ? 0.0f : (static_cast<float>(ev) / 127.0f * 2.0f - 1.0f) * 2.356f;
+        line_(c, ex + std::sin(a) * er * 0.62f, ey - std::cos(a) * er * 0.62f, ex + std::sin(a) * er * 0.95f,
               ey - std::cos(a) * er * 0.95f, eOn ? 0xE0E0E0FF : 0x555A66FF, 2.5);
         ImGui_PushFont(ctx, nullptr, 10.0);
         drawTextCentered_(c, ex, ey, 0xC8B070FF, eOn ? (L.encoder.name.empty() ? ("CC " + std::to_string(L.encoder.number)).c_str()
-                                                                               : L.encoder.name.c_str()) : "ENC");
+                                                                               : L.encoder.name.c_str()) : "");
         ImGui_PopFont(ctx);
         if (eHot) hoverDesc = eOn ? ctlDesc(Kind::VPot, L.encoder, "channel encoder") + ", all pages"
                                   : "channel encoder: no CC, keeps its normal job (click to assign)";
     }
-    anyKey(852, 160, 44, 20, 0x73, "NAV");
-    anyKey(898, 160, 44, 20, 0x74, "NUDGE");
-    anyKey(944, 160, 41, 20, 0x75, "FOCUS");
-    anyKey(880, 184, 76, 20, 0x76, "ENC PUSH");
-    label(918, 212, "ZOOM");
-    anyKey(898, 222, 40, 20, 0x7A, "\xE2\x96\xB4");
-    anyKey(852, 246, 40, 20, 0x7B, "\xE2\x97\x82");
-    anyKey(898, 246, 40, 20, 0x7C, "\xE2\x97\x8F");
-    anyKey(944, 246, 40, 20, 0x7D, "\xE2\x96\xB8");
-    anyKey(898, 270, 40, 20, 0x7E, "\xE2\x96\xBE");
-    label(918, 300, "BANK");
-    anyKey(866, 310, 48, 22, 0x78, "\xE2\x97\x82");
-    anyKey(922, 310, 48, 22, 0x79, "\xE2\x96\xB8");
-    label(918, 352, s_test ? (live ? "TEST: clicks send" : "TEST: layer not active") : "EDIT: click a control");
+    anyKey(852, 244, 44, 22, 0x73, "NAV");
+    anyKey(898, 244, 44, 22, 0x74, "NUDGE");
+    anyKey(944, 244, 41, 22, 0x75, "FOCUS");
+    anyKey(852, 270, 133, 18, 0x76, "PUSH");
+    label(917, 300, "BANK");
+    anyKey(870, 314, 42, 22, 0x78, "\xE2\x97\x82");
+    anyKey(922, 314, 42, 22, 0x79, "\xE2\x96\xB8");
+    {
+        constexpr float zx = 918, zy = 406;
+        anyKey(zx - 17, zy - 32, 34, 26, 0x7A, "\xE2\x96\xB2");
+        anyKey(zx - 54, zy,      34, 26, 0x7B, "\xE2\x97\x80");
+        anyKey(zx - 17, zy,      34, 26, 0x7C, "\xE2\x97\x8F");
+        anyKey(zx + 20, zy,      34, 26, 0x7D, "\xE2\x96\xB6");
+        anyKey(zx - 17, zy + 32, 34, 26, 0x7E, "\xE2\x96\xBC");
+    }
+    ImGui_PushFont(ctx, nullptr, 12.0);
+    drawTextCentered_(c, 500, 470, 0x9CA0AAFF, s_test ? (live ? "Rea-Sixty  \xC2\xB7  MIDI CC layer  \xC2\xB7  TEST: clicks send"
+                                                              : "Rea-Sixty  \xC2\xB7  MIDI CC layer  \xC2\xB7  TEST: layer not active")
+                                                      : "Rea-Sixty  \xC2\xB7  MIDI CC layer");
+    ImGui_PopFont(ctx);
 
     // ---- drags and releases (test mode) ----
     if (s_pot >= 0 && canvasActive) {
