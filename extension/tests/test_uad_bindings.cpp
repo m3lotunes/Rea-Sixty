@@ -54,6 +54,14 @@ int main()
     EXPECT(!bnd::uadLayerActive() && bnd::anyUadLayer());
     EXPECT(bnd::applyLayerOption(0, bnd::ButtonId::Layer1) == 0);
 
+    // QUICK 2's list persists in the layer's "uad" block.
+    EXPECT(bnd::uadQuick2(2).empty());
+    bnd::setUadQuick2(2, {"0/in/2", "0/aux/1"});
+    EXPECT(fileText().find("\"quick2\": [\"0/in/2\", \"0/aux/1\"]") != std::string::npos);
+    bnd::load();
+    EXPECT((bnd::uadQuick2(2) == std::vector<std::string>{"0/in/2", "0/aux/1"}));
+    EXPECT(bnd::uadQuick2(0).empty());
+
     // Reload from disk.
     bnd::setActiveLayer(2);
     bnd::load();

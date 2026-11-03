@@ -238,13 +238,31 @@ std::vector<std::string> Model::node_(const std::vector<std::string>& seg, const
                     if (d && d->get_string_value(false)) changed |= assign(in.defaultName, std::string(d->get_string_value(false)));
                 }
                 in.known = true;
-                for (const char* c : {"preamps", "sends", "meters"}) if (has(keys, c)) next.push_back(here + "/" + c);
+                for (const char* c : {"preamps", "sends", "meters", "effects"}) if (has(keys, c)) next.push_back(here + "/" + c);
             } else if (n == 5 && seg[4] == "preamps") {
                 if (has(keys, "0")) { changed |= assign(in.hasPreamp, true); next.push_back(here + "/0"); }
             } else if (n == 5 && seg[4] == "sends") {
                 list(in.sends);
             } else if (n == 5 && seg[4] == "meters") {
                 for (const char* c : {"0", "1"}) if (has(keys, c)) next.push_back(here + "/" + c);
+            } else if (n == 5 && seg[4] == "effects") {
+                list(in.effects);
+            } else if (n == 6 && seg[4] == "effects" && isIndex(seg[5])) {
+                eachProp();
+                Effect& ef = at(in.effects, std::atoi(seg[5].c_str()));
+                // A slot without parameters (emptied, or offline) has none to keep.
+                if (!has(keys, "parameters")) { if (!ef.params.empty()) { ef.params.clear(); changed = true; } }
+                else next.push_back(here + "/parameters");
+            } else if (n == 7 && seg[4] == "effects" && isIndex(seg[5]) && seg[6] == "parameters") {
+                Effect& ef = at(in.effects, std::atoi(seg[5].c_str()));
+                const int m = maxIndex(keys);
+                if (static_cast<int>(ef.params.size()) != m + 1) {
+                    ef.params.resize(static_cast<std::size_t>(m < 0 ? 0 : m + 1));
+                    changed = true;
+                }
+                for (const auto& k : keys) if (isIndex(k)) next.push_back(here + "/" + k);
+            } else if (n == 8 && seg[4] == "effects" && seg[6] == "parameters") {
+                eachProp();
             } else if (n == 6 && (seg[4] == "preamps" || seg[4] == "sends" || seg[4] == "meters")) {
                 eachProp();
             }
@@ -353,6 +371,20 @@ bool Model::value_(const std::vector<std::string>& seg, const std::string& prop,
         }
         if (n == 6 && seg[4] == "meters" && (seg[5] == "0" || seg[5] == "1"))
             return meterProp(in.meter[seg[5] == "1"], prop, v);
+        if (n == 6 && seg[4] == "effects" && isIndex(seg[5])) {
+            Effect& ef = at(in.effects, std::atoi(seg[5].c_str()));
+            if (prop == "EffectName") return setStr(ef.name, v);
+            if (prop == "Power")      return setBool(ef.power, v);
+            return false;
+        }
+        if (n == 8 && seg[4] == "effects" && isIndex(seg[5]) && seg[6] == "parameters" && isIndex(seg[7])) {
+            Effect& ef = at(in.effects, std::atoi(seg[5].c_str()));
+            Param& p = at(ef.params, std::atoi(seg[7].c_str()));
+            if (prop == "Name")            return setStr(p.name, v);
+            if (prop == "StringValue")     return setStr(p.text, v);
+            if (prop == "NormalizedValue") return setNum(p.norm, v);
+            return false;
+        }
         return false;
     }
     if (seg[2] == "auxs") {
@@ -450,5 +482,21 @@ std::string Model::stripPath(const Strip& s)
 }
 
 std::string Model::propPath(const Strip& s, const char* prop) { return stripPath(s) + "/" + prop; }
+
+std::string Model::stripId(const Strip& s)
+{
+    return std::to_string(s.device) + (s.kind == Strip::Kind::Aux ? "/aux/" : "/in/") + std::to_string(s.index);
+}
+
+bool Model::parseStripId(const std::string& id, Strip& out)
+{
+    const std::vector<std::string> seg = split(id);
+    if (seg.size() != 3 || !isIndex(seg[0]) || !isIndex(seg[2])) return false;
+    if (seg[1] != "in" && seg[1] != "aux") return false;
+    out.device = std::atoi(seg[0].c_str());
+    out.kind   = seg[1] == "aux" ? Strip::Kind::Aux : Strip::Kind::Input;
+    out.index  = std::atoi(seg[2].c_str());
+    return true;
+}
 
 }  // namespace uad

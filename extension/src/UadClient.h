@@ -74,7 +74,15 @@ struct Status {
     // What the surface shows now, for the Settings picture of the UF8.
     int         bank = 0, banks = 0;   // current bank of 8, number of banks
     int         softBank = 0;          // 0 V-POT (modes), 1 Monitor, 2 Preamp
-    int         mode = 0;              // uadsurf::PotMode: 0 Pan, 1 Send, 2 Preamp
+    int         mode = 0;              // uadsurf::PotMode: 0 Pan, 1 Send, 2 Preamp, 3 Plugin
+    int         quick = 0;             // 0 QUICK 1 (all channels), 1 QUICK 2 (the chosen ones)
+    int         uf8Ch[8] = {-1, -1, -1, -1, -1, -1, -1, -1};   // fader -> index into list
+    // PLUG-IN mode: what each V-Pot shows (Surface::pluginView).
+    int         pluginSlot = -1, paramPage = 0;
+    std::string pluginSlotName;        // the open slot's plug-in, empty = overview
+    std::string slotNames[8];          // the SEL channel's insert slots, "" = empty
+    struct Pot { std::string label, value; double norm = 0.0; bool has = false, on = false; };
+    Pot         pots[8];
     int         send = 0;              // the send SEND/PLUG-IN picked
     std::string selectedName;          // the SEL channel, empty = none
     bool        selectedPreamp = false;
@@ -83,6 +91,7 @@ struct Status {
     // Every channel in Console order, for the Console picture under the UF8.
     struct Channel {
         std::string name, type;        // type: MIC, LINE, ADAT, VIRT, AUX, ...
+        std::string id;                // uad::Model::stripId, for the QUICK 2 list
         bool   aux = false, stereo = false, preamp = false;
         bool   mute = false, solo = false, phantom = false;
         double faderDb = -144.0, faderTapered = 0.0, pan = 0.0, gainDb = 0.0;
@@ -123,6 +132,8 @@ public:
     void virtualPot(int pot, int detents, std::int64_t nowMs, bool offlineTest);
     std::uint32_t stripRgb(int s);
     Status status();
+    // QUICK 2's channels (bindings.json); the timer passes them every tick.
+    void setQuick2(const std::vector<std::string>& ids);
 
 private:
     void virtualFrame_(const uf8frames::Frame& f, std::int64_t nowMs, bool offlineTest);

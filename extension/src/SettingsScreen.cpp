@@ -2231,7 +2231,8 @@ void drawUf8UadVector(ImGui_Context* ctx)
     constexpr float W = 1000, H_UF8 = 490;
     const uadside::Status st = reasixty_uadStatus();
     const int nCh = static_cast<int>(st.list.size());
-    const float H = H_UF8 + (nCh > 0 ? 300.0f : 60.0f);
+    const int activeLayerForUad = uf8::bindings::getQuickLayer();
+    const float H = H_UF8 + (nCh > 0 ? 330.0f : 60.0f);
 
     // The virtual UF8: what is dragged or held sends the UF8's own frames
     // through the layer (reasixty_uadSide), so it tests the real path.
@@ -2346,10 +2347,11 @@ void drawUf8UadVector(ImGui_Context* ctx)
 
     // ---- Strips ----
     constexpr float kStripX0 = 138, kStripW = 80, kStripGap = 7;
-    static const char* const kModes[3] = {"PAN", "SEND", "INPUTS"};
-    static const char* const kModeDesc[3] = {
+    static const char* const kModes[4] = {"PAN", "SEND", "INPUTS", "PLUGIN"};
+    static const char* const kModeDesc[4] = {
         "V-Pots set the pan", "V-Pots set the send picked with SEND/PLUG-IN 1-6",
-        "V-Pots set the preamp gain (whole dB, channels with a preamp)"};
+        "V-Pots set the preamp gain (whole dB, channels with a preamp)",
+        "V-Pots show the SEL channel's plug-ins: push = on/off; SEND/PLUG-IN 1-8 opens one, its parameters on the V-Pots"};
     static const char* const kMon[5] = {"ALT", "DIM", "MONO", "MUTE", "TALK"};
     static const char* const kMonDesc[5] = {
         "monitor: ALT speakers on/off", "monitor: dim", "monitor: mono", "monitor: mute",
@@ -2359,18 +2361,19 @@ void drawUf8UadVector(ImGui_Context* ctx)
         "48V phantom power of the selected channel, only after holding 0.5 s",
         "pad of the selected channel", "phase of the selected channel",
         "low cut of the selected channel", "Hi-Z of the selected channel"};
-    const char* const potWhat = st.mode == 0 ? "pan" : st.mode == 1 ? "send level" : "preamp gain";
+    const char* const potWhat = st.mode == 0 ? "pan" : st.mode == 1 ? "send level"
+                              : st.mode == 2 ? "preamp gain" : "plug-in parameter";
     float faderX[8] = {0};
     for (int i = 0; i < 8; ++i) {
         const float sx = kStripX0 + i * (kStripW + kStripGap);
         const std::string& nm = st.names[i];
         const bool has = !nm.empty();
-        const int chIdx = st.bank * 8 + i;
+        const int chIdx = st.uf8Ch[i];
         const uadside::Status::Channel* ch =
             (chIdx >= 0 && chIdx < nCh) ? &st.list[static_cast<std::size_t>(chIdx)] : nullptr;
 
         // Top soft key: its function in the current soft-key bank.
-        if (st.softBank == 0 && i < 3) {
+        if (st.softBank == 0 && i < 4) {
             tile(sx + 6, 12, kStripW - 12, 22, kModes[i], kModeDesc[i], true, st.mode == i, 0x18 + i);
         } else if (st.softBank == 1 && i < 5) {
             const bool monOn = i == 1 ? st.monitorDim : i == 2 ? st.monitorMono : i == 3 ? st.monitorMute
@@ -2403,13 +2406,24 @@ void drawUf8UadVector(ImGui_Context* ctx)
                     else if (ch->sendDb <= -143.5) snprintf(val, sizeof(val), "S%d -inf", st.send + 1);
                     else snprintf(val, sizeof(val), "S%d %+.1f", st.send + 1, ch->sendDb);
                 }
-                if (*val) drawTextCentered_(c, sx + kStripW / 2.0f, 89, 0xC8B070FF, val);
+                if (*val && st.mode != 3) drawTextCentered_(c, sx + kStripW / 2.0f, 89, 0xC8B070FF, val);
                 ImGui_PopFont(ctx);
             }
         }
+        if (st.mode == 3) {
+            // PLUG-IN: the V-Pot belongs to the SEL channel's slot / parameter.
+            const auto& pv = st.pots[i];
+            rect_(c, sx + 4, 66, kStripW - 8, 30, 0x080C12FF, 0x444A55FF, 2.0);
+            ImGui_PushFont(ctx, nullptr, 10.0);
+            std::string pl = pv.label;
+            drawTextCentered_(c, sx + kStripW / 2.0f, 74, pv.has ? 0xD0D4DAFF : 0x6A6E78FF, shortName(pl, 11).c_str());
+            drawTextCentered_(c, sx + kStripW / 2.0f, 89, pv.has && !pv.on ? 0xE05050FF : 0xC8B070FF,
+                              shortName(pv.value, 11).c_str());
+            ImGui_PopFont(ctx);
+        }
         // V-Pot.
         const float vx = sx + kStripW / 2.0f, vy = 124;
-        const bool vHot = has && inside(vx - 18, vy - 18, 36, 36);
+        const bool vHot = (has || st.mode == 3) && inside(vx - 18, vy - 18, 36, 36);
         if (vHot && canvasClicked && leftBtn == 0) {
             s_dragPot = i; s_potY = my; s_potTurned = false;
         }
@@ -2419,7 +2433,10 @@ void drawUf8UadVector(ImGui_Context* ctx)
         {
             // Pan from the centre; send level and preamp gain from the left stop.
             float a = 0.0f;
-            if (ch && !ch->aux) {
+            if (st.mode == 3) {
+                if (st.pots[i].has)
+                    a = (static_cast<float>(std::clamp(st.pots[i].norm, 0.0, 1.0)) * 2.0f - 1.0f) * 2.356f;
+            } else if (ch && !ch->aux) {
                 if (st.mode == 0)
                     a = static_cast<float>(std::clamp(ch->pan, -1.0, 1.0)) * 2.356f;
                 else if (st.mode == 1 && ch->hasSend)
@@ -2431,8 +2448,11 @@ void drawUf8UadVector(ImGui_Context* ctx)
                   vx + std::sin(a) * 16.0f, vy - std::cos(a) * 16.0f, 0xCCCCCCFF, 2.0);
         }
         if (vHot) {
-            hoverDesc = std::string("V-Pot: drag up/down = ") + potWhat + " of " + nm
-                      + (st.mode == 0 ? "; click = push (centre)" : st.mode == 1 ? "; click = push (send on/off)" : "");
+            hoverDesc = st.mode == 3
+                ? std::string(st.pluginSlot < 0 ? "V-Pot: plug-in slot of the SEL channel; click = on/off (SEND/PLUG-IN opens it)"
+                                                : "V-Pot: drag up/down = this parameter of the open plug-in")
+                : std::string("V-Pot: drag up/down = ") + potWhat + " of " + nm
+                  + (st.mode == 0 ? "; click = push (centre)" : st.mode == 1 ? "; click = push (send on/off)" : "");
             if (canvasClicked && leftBtn == 0) { s_selKey = -2 - i; s_selDesc = hoverDesc; }
         }
         // SOLO / CUT / SEL.
@@ -2497,15 +2517,31 @@ void drawUf8UadVector(ImGui_Context* ctx)
             uf8::bindings::dispatch(layerIds[l], /*pressed*/ false);
         }
         if (l == activeLayer) ring(15, y, 36, 22);
-        tile(57, y, 36, 22, n, "", false);
+        if (l < 2)
+            tile(57, y, 36, 22, n, l == 0 ? "QUICK 1: every channel, in Console order"
+                                          : "QUICK 2: your channels (pick them with Q2 under the Console below)",
+                 true, st.quick == l, 0x43 + l);
+        else
+            tile(57, y, 36, 22, n, "", false);
     }
     tile(15, 108, 78, 24, "360\xC2\xB0", "as on every layer", true);
 
     groupLabel(54, 138, "SEND / PLUGIN");
     for (int k = 0; k < 8; ++k) {
         const float x = 13.0f + (k % 2) * 42.0f, y = 152.0f + (k / 2) * 26.0f;
-        const std::string& sn = st.sendNames[k];
         char n[4]; snprintf(n, sizeof(n), "%d", k + 1);
+        if (st.mode == 3) {
+            // PLUG-IN: the SEL channel's slots; a click opens one on the V-Pots.
+            std::string pn = st.slotNames[k];
+            if (pn.rfind("UAD ", 0) == 0) pn.erase(0, 4);
+            const std::string lbl = pn.empty() ? std::string(n) : shortName(pn, 6);
+            tile(x, y, 38, 22, lbl.c_str(),
+                 pn.empty() ? std::string("slot ") + n + ": empty"
+                            : "slot " + std::string(n) + ": " + pn + "; click = its parameters on the V-Pots, again = back",
+                 !pn.empty(), st.pluginSlot == k, 0x48 + k);
+            continue;
+        }
+        const std::string& sn = st.sendNames[k];
         const std::string lbl = sn.empty() ? std::string(n) : shortName(sn, 6);
         tile(x, y, 38, 22, lbl.c_str(),
              "V-Pots set send " + (sn.empty() ? std::string(n) : sn) + "; mode SEND",
@@ -2514,8 +2550,11 @@ void drawUf8UadVector(ImGui_Context* ctx)
     tile(13, 260, 50, 22, "PLUGIN", "", false);
     tile(67, 260, 50, 22, "CHANNEL", "", false);
     groupLabel(65, 286, "PAGE");
-    tile(13, 300, 50, 22, "\xE2\x97\x82", "", false);
-    tile(67, 300, 50, 22, "\xE2\x96\xB8", "", false);
+    {
+        const bool pg = st.mode == 3 && st.pluginSlot >= 0;
+        tile(13, 300, 50, 22, "\xE2\x97\x82", "previous 8 parameters", pg, false, 0x52);
+        tile(67, 300, 50, 22, "\xE2\x96\xB8", "next 8 parameters", pg, false, 0x53);
+    }
     tile(13, 326, 104, 22, "FLIP", "", false);
     groupLabel(65, 358, "AUTOMATION");
     {
@@ -2641,10 +2680,54 @@ void drawUf8UadVector(ImGui_Context* ctx)
                 if (canvasClicked && leftBtn == 0) { s_selKey = -40; s_selDesc = hoverDesc; }
             }
         }
+        // QUICK 2's list lives on the UAD layer: the active one, else the first.
+        int q2Layer = -1;
+        if (uf8::bindings::layerKind(activeLayerForUad) == uf8::bindings::LayerKind::Uad) q2Layer = activeLayerForUad;
+        for (int l = 0; q2Layer < 0 && l < 3; ++l)
+            if (uf8::bindings::layerKind(l) == uf8::bindings::LayerKind::Uad) q2Layer = l;
+        std::vector<std::string> q2 = q2Layer >= 0 ? uf8::bindings::uadQuick2(q2Layer) : std::vector<std::string>{};
+        bool q2Changed = false;
         for (int k = 0; k < nCh; ++k) {
             const uadside::Status::Channel& ch = st.list[static_cast<std::size_t>(k)];
             const float x = 8.0f + k * (cw + gap);
-            const bool onUf8 = k >= st.bank * 8 && k < st.bank * 8 + 8;
+            // Q2 row: in QUICK 2 or not, its place, and moving it.
+            if (q2Layer >= 0) {
+                const float qy = cy0 + chH + 6, qh = 18;
+                int pos = -1;
+                for (std::size_t p = 0; p < q2.size(); ++p) if (q2[p] == ch.id) pos = static_cast<int>(p);
+                ImGui_PushFont(ctx, nullptr, 10.0);
+                if (pos < 0) {
+                    const bool hot = inside(x, qy, cw, qh);
+                    rect_(c, x, qy, cw, qh, 0x1A1F26FF, hot ? 0x6688AAFF : 0x3A4050FF, 2.0);
+                    drawTextCentered_(c, x + cw / 2.0f, qy + qh / 2.0f, 0x8890A0FF, "+ Q2");
+                    if (hot) {
+                        hoverDesc = "add " + ch.name + " to QUICK 2 (at the end)";
+                        if (canvasClicked && leftBtn == 0) { q2.push_back(ch.id); q2Changed = true; }
+                    }
+                } else {
+                    const float aw = std::min(16.0f, cw / 3.0f);
+                    rect_(c, x, qy, cw, qh, 0x2A4A70FF, 0x4488DDFF, 2.0);
+                    char n[12]; snprintf(n, sizeof(n), "Q2 %d", pos + 1);
+                    drawTextCentered_(c, x + cw / 2.0f, qy + qh / 2.0f, 0xE0E4EAFF, n);
+                    drawTextCentered_(c, x + aw / 2.0f, qy + qh / 2.0f, 0xC0C4CCFF, "\xE2\x97\x82");
+                    drawTextCentered_(c, x + cw - aw / 2.0f, qy + qh / 2.0f, 0xC0C4CCFF, "\xE2\x96\xB8");
+                    const bool hl = inside(x, qy, aw, qh), hr = inside(x + cw - aw, qy, aw, qh);
+                    const bool hm = !hl && !hr && inside(x, qy, cw, qh);
+                    if (hl) hoverDesc = ch.name + ": one place earlier in QUICK 2";
+                    if (hr) hoverDesc = ch.name + ": one place later in QUICK 2";
+                    if (hm) hoverDesc = ch.name + " is QUICK 2 fader " + std::to_string(pos + 1) + "; click = remove";
+                    if (canvasClicked && leftBtn == 0) {
+                        const std::size_t p = static_cast<std::size_t>(pos);
+                        if (hl && pos > 0) { std::swap(q2[p], q2[p - 1]); q2Changed = true; }
+                        if (hr && p + 1 < q2.size()) { std::swap(q2[p], q2[p + 1]); q2Changed = true; }
+                        if (hm) { q2.erase(q2.begin() + pos); q2Changed = true; }
+                    }
+                }
+                ImGui_PopFont(ctx);
+            }
+            int fader = -1;   // the UF8 fader this channel is on now, -1 none
+            for (int f = 0; f < 8; ++f) if (st.uf8Ch[f] == k) fader = f;
+            const bool onUf8 = fader >= 0;
             const bool sel = !st.selectedName.empty() && ch.name == st.selectedName;
             rect_(c, x, cy0, cw, chH, ch.aux ? 0x1E2230FF : 0x1A1F26FF,
                   sel ? 0xAACCFFFF : onUf8 ? 0x4488DDFF : 0x3A4050FF, 3.0);
@@ -2680,14 +2763,15 @@ void drawUf8UadVector(ImGui_Context* ctx)
             drawTextCentered_(c, mid, cy0 + chH - 12, 0xC0C4CCFF, buf);
             ImGui_PopFont(ctx);
             if (inside(x, cy0, cw, chH)) {
-                hoverDesc = ch.name + (onUf8 ? ": on UF8 fader " + std::to_string(k - st.bank * 8 + 1)
-                                             : ": on bank " + std::to_string(k / 8 + 1) + ", fader "
-                                               + std::to_string(k % 8 + 1));
+                hoverDesc = ch.name + (onUf8 ? ": on UF8 fader " + std::to_string(fader + 1)
+                                             : st.quick == 0 ? ": on bank " + std::to_string(k / 8 + 1) + ", fader "
+                                                               + std::to_string(k % 8 + 1)
+                                                             : std::string(": not in QUICK 2"));
                 if (canvasClicked && leftBtn == 0) { s_selKey = -100 - k; s_selDesc = hoverDesc; }
             }
             // The cable from the UF8 fader to this channel (in steps, a soft S).
             if (onUf8) {
-                const float x0 = faderX[k - st.bank * 8], y0 = 446;
+                const float x0 = faderX[fader], y0 = 446;
                 const float x1 = mid, y1 = cy0 - 2;
                 float px = x0, py = y0;
                 for (int sgm = 1; sgm <= 16; ++sgm) {
@@ -2702,6 +2786,7 @@ void drawUf8UadVector(ImGui_Context* ctx)
                 }
             }
         }
+        if (q2Changed) uf8::bindings::setUadQuick2(q2Layer, q2);
     }
 
     // V-Pot / encoder: 6 px of drag = one detent, up = clockwise.

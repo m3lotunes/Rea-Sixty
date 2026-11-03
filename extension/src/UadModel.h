@@ -44,6 +44,19 @@ struct Preamp {
     int    knobSteps = 0;    // PreampInputKnobSteps, 0 = not reported
 };
 
+// A plug-in parameter (effects/K/parameters/N): only while a plug-in is loaded.
+struct Param {
+    std::string name, text;  // Name, StringValue ("-34.92")
+    double norm = 0.0;       // NormalizedValue 0..1
+};
+
+// One insert slot (effects/K). EffectName "" = empty.
+struct Effect {
+    std::string name;
+    bool   power = false;
+    std::vector<Param> params;
+};
+
 struct Input {
     std::string name, defaultName, stereoName, ioType;
     bool   stereo = false, active = false, enabledByUser = false, hidden = false;
@@ -53,6 +66,7 @@ struct Input {
     bool   hasPreamp = false;
     Preamp preamp;
     std::vector<Send> sends;
+    std::vector<Effect> effects;
     Meter  meter[2];
     bool   known = false;    // the node itself has been read
 };
@@ -119,6 +133,10 @@ public:
     static std::string devicePath(int d);
     static std::string stripPath(const Strip& s);
     static std::string propPath(const Strip& s, const char* prop);
+    // A strip as stable text for bindings.json: "0/in/2", "0/aux/1". parseStripId
+    // reads it back (false = not one).
+    static std::string stripId(const Strip& s);
+    static bool        parseStripId(const std::string& id, Strip& out);
 
 private:
     std::vector<std::string> node_(const std::vector<std::string>& seg, const void* data);

@@ -271,6 +271,12 @@ void Side::virtualPot(int pot, int detents, std::int64_t nowMs, bool offlineTest
     virtualFrame_(uf8sim::vpot(pot, std::clamp(detents, -31, 31)), nowMs, offlineTest);
 }
 
+void Side::setQuick2(const std::vector<std::string>& ids)
+{
+    std::lock_guard<std::mutex> lk(mx_);
+    surf_.setQuick2(ids);
+}
+
 void Side::invalidate()
 {
     std::lock_guard<std::mutex> lk(mx_);
@@ -314,13 +320,33 @@ Status Side::status()
         st.monitorMaxDb = mon.monitorMaxDb;
         break;
     }
+    // The faders show the QUICK view's channels, not every channel.
+    surf_.refresh();
+    const std::vector<uad::Strip> view = surf_.strips();
+    st.quick = surf_.quick();
+    st.banks = view.empty() ? 0 : (static_cast<int>(view.size()) + 7) / 8;
+    st.bank  = surf_.bank();
     for (int i = 0; i < 8; ++i) {
         const std::size_t idx = static_cast<std::size_t>(st.bank * 8 + i);
-        if (idx < strips.size()) st.names[i] = model_.name(strips[idx]);
+        if (idx >= view.size()) continue;
+        st.names[i] = model_.name(view[idx]);
+        for (std::size_t k = 0; k < strips.size(); ++k)
+            if (strips[k] == view[idx]) st.uf8Ch[i] = static_cast<int>(k);
+    }
+    st.pluginSlot = surf_.pluginSlot();
+    st.paramPage  = surf_.paramPage();
+    for (int i = 0; i < 8; ++i) {
+        const auto pv = surf_.pluginView(i);
+        st.pots[i] = Status::Pot{pv.label, pv.value, pv.norm, pv.has, pv.on};
     }
     const int sel = surf_.selected();
-    if (sel >= 0 && sel < st.channels) {
-        const uad::Strip& s = strips[static_cast<std::size_t>(sel)];
+    if (sel >= 0 && sel < static_cast<int>(view.size())) {
+        const uad::Strip& s = view[static_cast<std::size_t>(sel)];
+        if (const uad::Input* sin = model_.input(s)) {
+            for (std::size_t k = 0; k < sin->effects.size() && k < 8; ++k) st.slotNames[k] = sin->effects[k].name;
+            if (st.pluginSlot >= 0 && st.pluginSlot < static_cast<int>(sin->effects.size()))
+                st.pluginSlotName = sin->effects[static_cast<std::size_t>(st.pluginSlot)].name;
+        }
         st.selectedName = model_.name(s);
         const uad::Input* in = model_.input(s);
         st.selectedPreamp = in && in->hasPreamp;
@@ -329,6 +355,7 @@ Status Side::status()
     for (const uad::Strip& s : strips) {
         Status::Channel ch;
         ch.name = model_.name(s);
+        ch.id = uad::Model::stripId(s);
         if (const uad::Input* in = model_.input(s)) {
             ch.type = in->ioType;
             ch.stereo = in->stereo;

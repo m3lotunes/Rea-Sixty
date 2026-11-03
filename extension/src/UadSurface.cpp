@@ -92,6 +92,10 @@ bool allowedProperty(const std::string& p)
     if (n == 5 && s[2] == "outputs") return oneOf(name, {"CRMonitorLevel", "Mute", "DimOn", "MixToMono", "MixInSource"});
     if (n == 7 && s[2] == "inputs" && s[4] == "sends")   return oneOf(name, {"GainTapered", "Bypass"});
     if (n == 7 && s[2] == "inputs" && s[4] == "preamps") return oneOf(name, {"Gain", "48V", "Pad", "Phase", "LowCut", "HiZ"});
+    // Plug-ins: on/off and parameter values only. Never EffectName (that loads a
+    // plug-in), Preset, or anything under /pluginscenes.
+    if (n == 7 && s[2] == "inputs" && s[4] == "effects") return name == "Power";
+    if (n == 9 && s[2] == "inputs" && s[4] == "effects" && s[6] == "parameters") return name == "NormalizedValue";
     return false;
 }
 
@@ -114,6 +118,78 @@ int Surface::stripAt_(int s) const
 {
     const int idx = bank_ * 8 + s;
     return (s >= 0 && s < 8 && idx < static_cast<int>(strips_.size())) ? idx : -1;
+}
+
+void Surface::rebuildStrips_()
+{
+    std::vector<uad::Strip> all = m_.strips();
+    if (quick_ == 0) {
+        strips_ = std::move(all);
+    } else {
+        // QUICK 2: the chosen channels, in their order, as far as Console shows them.
+        std::vector<uad::Strip> v;
+        for (const std::string& id : quick2_) {
+            uad::Strip st;
+            if (!uad::Model::parseStripId(id, st)) continue;
+            if (std::find(all.begin(), all.end(), st) != all.end() && std::find(v.begin(), v.end(), st) == v.end())
+                v.push_back(st);
+        }
+        strips_ = std::move(v);
+    }
+    const int maxBank = strips_.empty() ? 0 : (static_cast<int>(strips_.size()) - 1) / 8;
+    bank_ = std::clamp(bank_, 0, maxBank);
+    if (selected_ >= static_cast<int>(strips_.size())) selected_ = -1;
+}
+
+const uad::Input* Surface::selIn_() const
+{
+    if (selected_ < 0 || selected_ >= static_cast<int>(strips_.size())) return nullptr;
+    return m_.input(strips_[static_cast<std::size_t>(selected_)]);
+}
+
+std::string Surface::slotPath_(int k) const
+{
+    return uad::Model::propPath(strips_[static_cast<std::size_t>(selected_)], "effects/") + std::to_string(k);
+}
+
+namespace {
+std::string shortPlugin(std::string n)
+{
+    if (n.rfind("UAD ", 0) == 0) n.erase(0, 4);
+    return n;
+}
+}  // namespace
+
+Surface::PotView Surface::pluginView(int s) const
+{
+    PotView pv;
+    const uad::Input* in = selIn_();
+    if (!in) { pv.label = "Plug-in"; pv.value = "SEL ch"; return pv; }
+    if (slot_ < 0) {
+        if (s >= static_cast<int>(in->effects.size()) || in->effects[static_cast<std::size_t>(s)].name.empty()) {
+            pv.label = "Slot " + std::to_string(s + 1);
+            pv.value = "-";
+            return pv;
+        }
+        const uad::Effect& e = in->effects[static_cast<std::size_t>(s)];
+        pv.label = shortPlugin(e.name);
+        pv.value = e.power ? "on" : "off";
+        pv.has = true;
+        pv.on = e.power;
+        pv.norm = e.power ? 1.0 : 0.0;
+        return pv;
+    }
+    if (slot_ >= static_cast<int>(in->effects.size())) return pv;
+    const uad::Effect& e = in->effects[static_cast<std::size_t>(slot_)];
+    const int p = paramPage_ * 8 + s;
+    if (p >= static_cast<int>(e.params.size())) return pv;
+    const uad::Param& pr = e.params[static_cast<std::size_t>(p)];
+    pv.label = pr.name;
+    pv.value = pr.text;
+    pv.norm = pr.norm;
+    pv.has = true;
+    pv.on = e.power;
+    return pv;
 }
 
 std::uint32_t Surface::stripRgb(int s) const
@@ -176,7 +252,7 @@ void Surface::toggle_(const std::string& prop, bool current, std::int64_t now, O
 bool Surface::fromUf8(const uf8frames::Frame& f, std::int64_t now, Out& out)
 {
     if (f.n < 6) return false;
-    if (strips_.empty()) strips_ = m_.strips();
+    if (strips_.empty()) rebuildStrips_();
     const std::uint8_t cmd = f.b[1];
     if (cmd == 0x20 && f.b[2] == 0x02) {                        // touch
         const int s = f.b[3];
@@ -259,7 +335,7 @@ void Surface::key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out)
         const int idx = stripAt_(s);
         if (idx < 0) return;
         const uad::Strip& st = strips_[static_cast<std::size_t>(idx)];
-        if (type == 2) { selected_ = idx; return; }
+        if (type == 2) { if (selected_ != idx) { selected_ = idx; slot_ = -1; paramPage_ = 0; } return; }
         if (const uad::Input* in = m_.input(st)) {
             if (type == 0) toggle_(uad::Model::propPath(st, "Solo"), in->solo, now, out);
             else           toggle_(uad::Model::propPath(st, "Mute"), in->mute, now, out);
@@ -268,12 +344,21 @@ void Surface::key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out)
         }
         return;
     }
+    if (id >= 0x08 && id <= 0x0F && mode_ == PotMode::Plugin) {   // V-Pot push, PLUG-IN
+        // Overview: the slot on/off. The slots follow the V-Pots, not the channels.
+        const uad::Input* in = selIn_();
+        const int k = id - 0x08;
+        if (slot_ < 0 && in && k < static_cast<int>(in->effects.size()) && !in->effects[static_cast<std::size_t>(k)].name.empty())
+            toggle_(slotPath_(k) + "/Power", in->effects[static_cast<std::size_t>(k)].power, now, out);
+        return;
+    }
     if (id >= 0x08 && id <= 0x0F) {                             // V-Pot push
         const int idx = stripAt_(id - 0x08);
         if (idx < 0) return;
         const uad::Strip& st = strips_[static_cast<std::size_t>(idx)];
         const uad::Input* in = m_.input(st);
         if (!in) return;
+        if (mode_ == PotMode::Plugin) return;
         if (mode_ == PotMode::Pan) write_(uad::Model::propPath(st, "Pan"), "0", now, out);
         else if (mode_ == PotMode::Send && send_ < static_cast<int>(in->sends.size()))
             toggle_(uad::Model::propPath(st, "sends/") + std::to_string(send_) + "/Bypass",
@@ -281,6 +366,44 @@ void Surface::key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out)
         return;
     }
     if (id >= 0x68 && id < 0x68 + kSoftBanks) { softBank_ = id - 0x68; return; }
+    if (id >= 0x48 && id <= 0x4F && mode_ == PotMode::Plugin) {  // PLUG-IN: open / close a slot
+        const int k = id - 0x48;
+        const uad::Input* in = selIn_();
+        if (slot_ == k) { slot_ = -1; return; }
+        if (in && k < static_cast<int>(in->effects.size()) && !in->effects[static_cast<std::size_t>(k)].name.empty()) {
+            slot_ = k;
+            paramPage_ = 0;
+            out.cmds.push_back(uad::get(slotPath_(k)));   // its parameters, read afresh
+        }
+        return;
+    }
+    if (id == 0x52 || id == 0x53) {                             // PAGE < >: parameter pages
+        if (mode_ != PotMode::Plugin || slot_ < 0) return;
+        const uad::Input* in = selIn_();
+        if (!in || slot_ >= static_cast<int>(in->effects.size())) return;
+        const int n = static_cast<int>(in->effects[static_cast<std::size_t>(slot_)].params.size());
+        const int maxPage = n <= 0 ? 0 : (n - 1) / 8;
+        paramPage_ = std::clamp(paramPage_ + (id == 0x53 ? 1 : -1), 0, maxPage);
+        return;
+    }
+    if (id == 0x43 || id == 0x44) {                             // QUICK 1 / QUICK 2: the view
+        const int q = id - 0x43;
+        if (q == quick_) return;
+        const uad::Strip* sel = selected_ >= 0 && selected_ < static_cast<int>(strips_.size())
+                              ? &strips_[static_cast<std::size_t>(selected_)] : nullptr;
+        const uad::Strip keep = sel ? *sel : uad::Strip{};
+        quickBank_[static_cast<std::size_t>(quick_)] = bank_;
+        quick_ = q;
+        bank_ = quickBank_[static_cast<std::size_t>(q)];
+        rebuildStrips_();
+        // The selected channel stays selected if the new view has it.
+        selected_ = -1;
+        if (sel)
+            for (std::size_t i = 0; i < strips_.size(); ++i)
+                if (strips_[i] == keep) selected_ = static_cast<int>(i);
+        if (selected_ < 0) { slot_ = -1; paramPage_ = 0; }
+        return;
+    }
     if (id >= 0x48 && id <= 0x4F) {                             // SEND/PLUG-IN 1..8 = the send
         int count = 0;
         for (const auto& st : strips_) if (const uad::Input* in = m_.input(st)) { count = static_cast<int>(in->sends.size()); break; }
@@ -312,6 +435,7 @@ void Surface::soft_(int key, bool pressed, std::int64_t now, Out& out)
         if (key == 0) mode_ = PotMode::Pan;
         if (key == 1) mode_ = PotMode::Send;
         if (key == 2) mode_ = PotMode::Preamp;
+        if (key == 3) mode_ = PotMode::Plugin;
         return;
     }
     if (softBank_ == 1 && key == 4) {                           // TALKBACK, as in Console:
@@ -365,6 +489,21 @@ void Surface::soft_(int key, bool pressed, std::int64_t now, Out& out)
 
 void Surface::pot_(int s, int d, std::int64_t now, Out& out)
 {
+    if (mode_ == PotMode::Plugin) {
+        // The edited slot's parameter on this V-Pot; the overview turns nothing.
+        const uad::Input* in = selIn_();
+        if (!in || slot_ < 0 || slot_ >= static_cast<int>(in->effects.size())) return;
+        const uad::Effect& e = in->effects[static_cast<std::size_t>(slot_)];
+        const int p = paramPage_ * 8 + s;
+        if (p >= static_cast<int>(e.params.size())) return;
+        const std::string prop = slotPath_(slot_) + "/parameters/" + std::to_string(p) + "/NormalizedValue";
+        double base = e.params[static_cast<std::size_t>(p)].norm;
+        auto it = pending_.find(prop);
+        if (it != pending_.end() && now - it->second.lastSentMs < kHandHoldMs)
+            base = std::strtod(it->second.json.c_str(), nullptr);
+        write_(prop, num(std::clamp(base + d * (fine_ ? 0.002 : 0.01), 0.0, 1.0)), now, out);
+        return;
+    }
     const int idx = stripAt_(s);
     if (idx < 0) return;
     const uad::Strip& st = strips_[static_cast<std::size_t>(idx)];
@@ -414,10 +553,7 @@ std::string Surface::potText_(int idx, bool full) const
 
 void Surface::refresh()
 {
-    strips_ = m_.strips();
-    const int maxBank = strips_.empty() ? 0 : (static_cast<int>(strips_.size()) - 1) / 8;
-    bank_ = std::clamp(bank_, 0, maxBank);
-    if (selected_ >= static_cast<int>(strips_.size())) selected_ = -1;
+    rebuildStrips_();
 }
 
 void Surface::service(std::int64_t now, Out& out)
@@ -442,10 +578,7 @@ void Surface::service(std::int64_t now, Out& out)
 
 void Surface::paint(std::int64_t now, Out& out)
 {
-    strips_ = m_.strips();
-    const int maxBank = strips_.empty() ? 0 : (static_cast<int>(strips_.size()) - 1) / 8;
-    bank_ = std::clamp(bank_, 0, maxBank);
-    if (selected_ >= static_cast<int>(strips_.size())) selected_ = -1;
+    rebuildStrips_();
 
     service(now, out);
     if (fresh_) {
@@ -518,17 +651,31 @@ void Surface::paint(std::int64_t now, Out& out)
             // No channels at all (the Console is not running, or not read yet): say so
             // on the first strip instead of a dark surface.
             if (s == 0 && strips_.empty()) {
-                v.upper     = "UAD";
-                v.valueLine = uf8ValueLine("UAD Console", "offline");
-                lower       = "offline";
+                const bool emptyQuick = quick_ == 1 && !m_.strips().empty();
+                v.upper     = emptyQuick ? "QUICK 2" : "UAD";
+                v.valueLine = emptyQuick ? uf8ValueLine("QUICK 2", "empty") : uf8ValueLine("UAD Console", "offline");
+                lower       = emptyQuick ? "empty" : "offline";
+            }
+        }
+        if (mode_ == PotMode::Plugin) {
+            // The V-Pots belong to the SEL channel's plug-ins, not to the strip's channel.
+            const PotView pv = pluginView(s);
+            v.valueLine = uf8ValueLine(utf8ToLatin1(pv.label), utf8ToLatin1(pv.value));
+            lower       = utf8ToLatin1(pv.value);
+            if (pv.has) {
+                mode[i] = 0x01;
+                bar[i] = uf8::vpotPosUnipolar(std::clamp(pv.norm, 0.0, 1.0));
+            } else {
+                mode[i] = 0x03;
+                bar[i] = uf8::vpotPosUnipolar(0.0);
             }
         }
         // The soft key above the strip: its function in the current soft-key bank.
-        static const char* const kModes[3] = {"PAN", "SEND", "INPUTS"};
+        static const char* const kModes[4] = {"PAN", "SEND", "INPUTS", "PLUGIN"};
         static const char* const kMon[4]   = {"ALT", "DIM", "MONO", "MUTE"};
         static const char* const kPre[5]   = {"48V", "PAD", "PHASE", "LOW CUT", "HI-Z"};
         int lit = -1;
-        if (softBank_ == 0 && s < 3) {
+        if (softBank_ == 0 && s < 4) {
             v.slotLabel = kModes[s];
             lit = static_cast<int>(mode_) == s ? 2 : 1;
         } else if (softBank_ == 1 && s < 4) {
@@ -593,12 +740,34 @@ void Surface::paint(std::int64_t now, Out& out)
     for (int b = 0; b < 6; ++b) lamp(banks[b], b >= kSoftBanks ? 0 : b == softBank_ ? 2 : 1);
     const G sp[8] = {G::SendPlugin1, G::SendPlugin2, G::SendPlugin3, G::SendPlugin4,
                      G::SendPlugin5, G::SendPlugin6, G::SendPlugin7, G::SendPlugin8};
-    for (int k = 0; k < 8; ++k) lamp(sp[k], k >= sendCount ? 0 : (mode_ == PotMode::Send && k == send_) ? 2 : 1);
+    if (mode_ == PotMode::Plugin) {
+        // SEND/PLUG-IN k opens slot k: lit = open, dim = a plug-in there, off = empty.
+        const uad::Input* in = selIn_();
+        for (int k = 0; k < 8; ++k) {
+            const bool there = in && k < static_cast<int>(in->effects.size())
+                            && !in->effects[static_cast<std::size_t>(k)].name.empty();
+            lamp(sp[k], k == slot_ ? 2 : there ? 1 : 0);
+        }
+    } else {
+        for (int k = 0; k < 8; ++k) lamp(sp[k], k >= sendCount ? 0 : (mode_ == PotMode::Send && k == send_) ? 2 : 1);
+    }
+    lamp(G::Quick1, quick_ == 0 ? 2 : 1);
+    lamp(G::Quick2, quick_ == 1 ? 2 : 1);
+    {
+        int maxPage = -1;
+        if (const uad::Input* in = selIn_(); in && mode_ == PotMode::Plugin && slot_ >= 0
+            && slot_ < static_cast<int>(in->effects.size())) {
+            const int n = static_cast<int>(in->effects[static_cast<std::size_t>(slot_)].params.size());
+            maxPage = n <= 0 ? 0 : (n - 1) / 8;
+        }
+        lamp(G::PageLeft, maxPage >= 0 && paramPage_ > 0 ? 1 : 0);
+        lamp(G::PageRight, maxPage >= 0 && paramPage_ < maxPage ? 1 : 0);
+    }
     lamp(G::BankLeft, bank_ > 0 ? 1 : 0);
     lamp(G::BankRight, bank_ < maxB ? 1 : 0);
     lamp(G::Pan, mode_ == PotMode::Pan ? 2 : 1);
     lamp(G::Fine, fine_ ? 2 : 1);
-    for (G g : {G::Quick1, G::Quick2, G::Quick3, G::Channel, G::Plugin, G::PageLeft, G::PageRight,
+    for (G g : {G::Quick3, G::Channel, G::Plugin,
                 G::Flip, G::AutoOff, G::AutoRead, G::AutoWrite, G::AutoTrim, G::AutoLatch, G::AutoTouch,
                 G::Norm, G::Rec, G::Auto, G::Nav, G::Nudge, G::Focus,
                 G::ZoomUp, G::ZoomLeft, G::ZoomCenter, G::ZoomRight, G::ZoomDown})
@@ -649,6 +818,23 @@ std::vector<std::string> Surface::wantedSubscriptions() const
             if (in->hasPreamp)
                 for (const char* p : {"Gain", "48V", "Pad", "Phase", "LowCut", "HiZ"})
                     w.push_back(uad::Model::propPath(st, "preamps/0/") + p);
+        }
+    }
+    // PLUG-IN: the SEL channel's slots, and the open slot's parameters.
+    if (mode_ == PotMode::Plugin) {
+        if (const uad::Input* in = selIn_()) {
+            for (std::size_t k = 0; k < in->effects.size() && k < 8; ++k)
+                for (const char* p : {"EffectName", "Power"})
+                    w.push_back(slotPath_(static_cast<int>(k)) + "/" + p);
+            if (slot_ >= 0 && slot_ < static_cast<int>(in->effects.size())) {
+                const auto& ps = in->effects[static_cast<std::size_t>(slot_)].params;
+                for (int s = 0; s < 8; ++s) {
+                    const int p = paramPage_ * 8 + s;
+                    if (p >= static_cast<int>(ps.size())) break;
+                    for (const char* f : {"NormalizedValue", "StringValue"})
+                        w.push_back(slotPath_(slot_) + "/parameters/" + std::to_string(p) + "/" + f);
+                }
+            }
         }
     }
     return w;

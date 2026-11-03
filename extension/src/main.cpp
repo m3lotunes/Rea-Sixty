@@ -41240,6 +41240,13 @@ static void uadTick_()
     const bool any = uf8::bindings::anyUadLayer();
     g_uadSide.enable(any);
     const int idx = uf8::bindings::uadLayerActiveIndex();
+    // QUICK 2's channels: the active UAD layer's, else the first UAD layer's.
+    if (any) {
+        int ql = idx;
+        for (int l = 0; ql < 0 && l < 3; ++l)
+            if (uf8::bindings::layerKind(l) == uf8::bindings::LayerKind::Uad) ql = l;
+        if (ql >= 0) g_uadSide.setQuick2(uf8::bindings::uadQuick2(ql));
+    }
     if (idx != g_uadIdx) {
         const bool entered = idx >= 0 && g_uadIdx < 0;
         const bool left    = g_uadIdx >= 0 && idx < 0;

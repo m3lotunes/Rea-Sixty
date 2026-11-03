@@ -354,6 +354,64 @@ int main()
         EXPECT(r.uf8.lower[0] == "<C>");
     }
 
+    // ---- 12. QUICK 2: the chosen channels on the faders; PLUG-IN -------------------------
+    {
+        Rig r;
+        const std::vector<uad::Strip> all = r.surf.strips();
+        EXPECT(r.surf.quick() == 0 && all.size() > 3);
+        r.surf.setQuick2({uad::Model::stripId(all[2]), "0/in/999", "nonsense", uad::Model::stripId(all[0])});
+        r.key(0x44);
+        r.paint();
+        EXPECT(r.surf.quick() == 1 && r.surf.strips().size() == 2);
+        EXPECT(r.surf.strips().size() == 2 && r.surf.strips()[0] == all[2] && r.surf.strips()[1] == all[0]);
+        r.eng.sets.clear();
+        r.press(uf8sim::touch(0, true));
+        r.press(uf8sim::fader(0, 9000, true));
+        r.paint(100);
+        bool wroteThird = false;
+        for (const auto& s : r.eng.sets)
+            wroteThird = wroteThird || s.find(uad::Model::propPath(all[2], "FaderLevelTapered")) != std::string::npos;
+        EXPECT(wroteThird);
+        r.press(uf8sim::touch(0, false));
+        r.paint(300);
+        r.key(0x43);
+        r.paint();
+        EXPECT(r.surf.quick() == 0 && r.surf.strips().size() == all.size());
+
+        // PLUG-IN: SEL UAD 1, mode PLUGIN, the 1176 on V-Pot 3.
+        r.key(0x22);
+        r.key(0x1B);
+        r.paint();
+        EXPECT(r.surf.mode() == uadsurf::PotMode::Plugin && r.surf.selected() == 0);
+        auto pv = r.surf.pluginView(2);
+        EXPECT(pv.has && pv.label == "UA 1176LN Legacy" && pv.value == "on");
+        EXPECT(!r.surf.pluginView(0).has);
+        r.key(0x08 + 2);                                     // push = off
+        r.paint(100);
+        EXPECT(!r.model.devices[0].inputs[0].effects[2].power);
+        r.key(0x48 + 0);                                     // an empty slot does not open
+        EXPECT(r.surf.pluginSlot() == -1);
+        r.key(0x48 + 2);                                     // the 1176's parameters
+        r.paint();
+        EXPECT(r.surf.pluginSlot() == 2);
+        pv = r.surf.pluginView(0);
+        EXPECT(pv.has && pv.label == "Input" && pv.value == "-34.92");
+        const double before = r.model.devices[0].inputs[0].effects[2].params[0].norm;
+        r.press(uf8sim::vpot(0, 5));
+        r.paint(100);
+        EXPECT(std::fabs(r.model.devices[0].inputs[0].effects[2].params[0].norm - (before + 0.05)) < 1e-6);
+        r.key(0x48 + 2);                                     // again = back to the overview
+        EXPECT(r.surf.pluginSlot() == -1);
+        EXPECT(uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/Power"));
+        EXPECT(uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/parameters/0/NormalizedValue"));
+        EXPECT(!uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/parameters/0/StringValue"));
+        EXPECT(!uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/Preset"));
+        EXPECT(uadsurf::allowedProperty("/TalkbackOn") && !uadsurf::allowedProperty("/Dirty"));
+        // a strip id survives the round trip
+        uad::Strip back;
+        EXPECT(uad::Model::parseStripId(uad::Model::stripId(all[1]), back) && back == all[1]);
+    }
+
     // ---- 11. the layer keys stay Rea-Sixty's; the allowlist --------------------------------
     {
         Rig r;

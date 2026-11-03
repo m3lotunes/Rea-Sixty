@@ -326,8 +326,28 @@ inline Engine twinMkII(bool online = true)
             range(e.prop(M, "MeterPeakLevel", "float", "-77.0"), -77, 0);
             e.prop(M, "MeterClip", "bool", "false");
         }
-        e.link(I, "effects");                     // eight slots, not walked
-        for (int k = 0; k < 8; ++k) e.link(I + "/effects", std::to_string(k));
+        e.link(I, "effects");                     // eight slots
+        for (int k = 0; k < 8; ++k) {
+            const std::string F = I + "/effects/" + std::to_string(k);
+            e.link(I + "/effects", std::to_string(k));
+            // UAD 1 slot 2: a 1176 with two of its parameters (measured names and
+            // values, 03.11.2026); every other slot empty.
+            const bool loaded = i == 0 && k == 2;
+            e.prop(F, "EffectName", "string", q(loaded ? "UAD UA 1176LN Legacy" : ""));
+            e.prop(F, "Power", "bool", loaded ? "true" : "false");
+            if (loaded) {
+                e.link(F, "parameters");
+                const char* pn[2] = {"Input", "Output"};
+                const char* pv[2] = {"0.272552490234375", "0.670074462890625"};
+                for (int p = 0; p < 2; ++p) {
+                    const std::string Pp = F + "/parameters/" + std::to_string(p);
+                    e.link(F + "/parameters", std::to_string(p));
+                    e.prop(Pp, "Name", "string", q(pn[p]));
+                    e.prop(Pp, "StringValue", "string", q(p ? "-15.84" : "-34.92"));
+                    range(e.prop(Pp, "NormalizedValue", "float", pv[p]), 0, 1);
+                }
+            }
+        }
     }
     for (int a = 0; a < 2; ++a) {
         const std::string A = D + "/auxs/" + std::to_string(a);

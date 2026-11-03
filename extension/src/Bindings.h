@@ -867,6 +867,9 @@ struct Layer {
     // to Reaper for a while does not lose the CC set.
     bool          ccUsed = false;
     midicc::Layer cc     = midicc::factoryLayer();
+    // UAD Console layer: the channels QUICK 2 puts on the faders, in order, as
+    // UadModel::stripId ("0/in/2", "0/aux/1"). Empty = none chosen yet.
+    std::vector<std::string> uadQuick2;
 };
 
 // A named CC set, recallable into any CC layer (Save / Load in the layer block).
@@ -1290,6 +1293,9 @@ void          refreshCcLayerActive();
 bool          uadLayerActive();
 int           uadLayerActiveIndex();                    // -1 = none
 bool          anyUadLayer();
+// The UAD layer's QUICK 2 channel list (Layer::uadQuick2). The setter persists.
+std::vector<std::string> uadQuick2(int layer);
+void          setUadQuick2(int layer, const std::vector<std::string>& ids);
 // Presets: save overwrites by name.
 std::vector<std::string> ccPresetNames();
 bool          saveCcPreset(const std::string& name, int layer);

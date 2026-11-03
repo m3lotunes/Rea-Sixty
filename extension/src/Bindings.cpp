@@ -2143,6 +2143,14 @@ void serializeLayerBody_(const Layer& L, std::ostringstream& os,
         os << fieldPad << "\"kind\": \"midi_cc\",\n";
     if (L.kind == LayerKind::Uad)
         os << fieldPad << "\"kind\": \"uad\",\n";
+    if (!L.uadQuick2.empty()) {
+        os << fieldPad << "\"uad\": {\"quick2\": [";
+        for (std::size_t i = 0; i < L.uadQuick2.size(); ++i) {
+            if (i) os << ", ";
+            appendEscaped(os, L.uadQuick2[i]);
+        }
+        os << "]},\n";
+    }
     if (L.kind == LayerKind::MidiCc || L.ccUsed) {
         os << fieldPad << "\"midi_cc\": ";
         serializeCcLayer_(L.cc, os, fieldPad);
@@ -3219,6 +3227,13 @@ bool parseLayer_(wdl_json_element* lobj, Layer& out)
             out.kind = std::strcmp(s, "midi_cc") == 0 ? LayerKind::MidiCc
                      : std::strcmp(s, "uad") == 0     ? LayerKind::Uad
                                                       : LayerKind::Reaper;
+    if (auto* v = lobj->get_item_by_name("uad"); v && v->is_object()) {
+        if (auto* q = v->get_item_by_name("quick2"); q && q->is_array()) {
+            out.uadQuick2.clear();
+            for (int i = 0; q->enum_item(i); ++i)
+                if (const char* s = q->enum_item(i)->get_string_value()) out.uadQuick2.emplace_back(s);
+        }
+    }
     if (auto* v = lobj->get_item_by_name("midi_cc"); v && v->is_object()) {
         out.ccUsed = true;
         parseCcLayer_(v, out.cc);
@@ -10103,6 +10118,22 @@ void setLayerKind(int layer, LayerKind kind)
     L.kind = kind;
     if (kind == LayerKind::MidiCc) L.ccUsed = true;
     refreshCcActiveLocked_();
+    persistLocked_();
+}
+
+std::vector<std::string> uadQuick2(int layer)
+{
+    if (layer < 0 || layer > 2) return {};
+    std::lock_guard<std::mutex> lk(g_cfgMutex);
+    return g_cfg.layers[layer].uadQuick2;
+}
+
+void setUadQuick2(int layer, const std::vector<std::string>& ids)
+{
+    if (layer < 0 || layer > 2) return;
+    std::lock_guard<std::mutex> lk(g_cfgMutex);
+    if (g_cfg.layers[layer].uadQuick2 == ids) return;
+    g_cfg.layers[layer].uadQuick2 = ids;
     persistLocked_();
 }
 

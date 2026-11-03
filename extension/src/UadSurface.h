@@ -37,7 +37,7 @@ struct Out {
 };
 
 // What the V-Pots do (the V-POT soft-key bank, the user's old Layer 3 labels).
-enum class PotMode : std::uint8_t { Pan, Send, Preamp };
+enum class PotMode : std::uint8_t { Pan, Send, Preamp, Plugin };
 
 constexpr int kTouchQuietMs = 150;   // main.cpp's kTouchDebounceQuiet
 constexpr int kWriteMs      = 16;    // one write per path per window [Ref: open-apollo]
@@ -75,6 +75,18 @@ public:
     // 48V. The owner sets it around one input and clears it again.
     void setOfflineWrites(bool on) { offlineWrites_ = on; }
 
+    // QUICK 2's channels (bindings.json, Layer::uadQuick2, as Model::stripId).
+    // QUICK 1 is every channel in Console order.
+    void setQuick2(const std::vector<std::string>& ids) { quick2_ = ids; }
+    int  quick() const { return quick_; }           // 0 = QUICK 1, 1 = QUICK 2
+    const std::vector<uad::Strip>& strips() const { return strips_; }   // on the faders, in order
+
+    // PLUG-IN mode: the selected channel's insert slots, and one slot's parameters.
+    int  pluginSlot() const { return slot_; }       // -1 = the slot overview
+    int  paramPage() const  { return paramPage_; }
+    struct PotView { std::string label, value; double norm = 0.0; bool has = false, on = false; };
+    PotView pluginView(int s) const;                 // what V-Pot s shows in PLUG-IN mode
+
     // What the client should be subscribed to for what is on the surface now.
     std::vector<std::string> wantedSubscriptions() const;
 
@@ -101,6 +113,9 @@ private:
     bool devOk_(const uad::Device& D) const { return D.online || offlineWrites_; }
     bool offlineWrites_ = false;
     int  stripAt_(int s) const;            // surface strip 0..7 -> index into strips, -1
+    void rebuildStrips_();                 // strips_ from the model and the QUICK view
+    const uad::Input* selIn_() const;      // the SEL channel's input, null = none
+    std::string slotPath_(int k) const;    // the SEL channel's effects/k
     void write_(const std::string& prop, const std::string& json, std::int64_t now, Out& out);
     void flush_(std::int64_t now, Out& out);
     void key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out);
@@ -131,6 +146,10 @@ private:
     std::int64_t talkDownMs_ = 0;              // TALK soft key: tap latches, hold talks
     bool         talkWasOn_ = false, talkHeld_ = false;
     bool         fresh_ = true;
+    int          quick_ = 0;                   // 0 all channels, 1 the QUICK 2 list
+    std::vector<std::string> quick2_;
+    std::array<int, 2> quickBank_{};           // each view keeps its own bank
+    int          slot_ = -1, paramPage_ = 0;   // PLUG-IN: edited slot, parameter page
 };
 
 }  // namespace uadsurf
