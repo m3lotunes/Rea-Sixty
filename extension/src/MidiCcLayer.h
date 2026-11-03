@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iterator>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -102,6 +103,51 @@ struct Page {
     const Control& at(Kind k, int i) const { return const_cast<Page*>(this)->at(k, i); }
 };
 
+// ---- every other UF8 key, and the channel encoder (Frank 03.11.2026) -------------
+// Any key not covered by the per-page kinds above can carry a CC too, the same on
+// every page. A key without one keeps its normal job on this layer (Layer 1's, or
+// none). Never: LAYER 1..3 and 360 (the way out of the layer), the page keys
+// V-POT / 1..5 and PAGE < > (the layer's own pages), and the keys the kinds above
+// own (feet, V-Pot pushes, soft-keys, SEND/PLUG-IN).
+inline bool keyAssignable(int id)
+{
+    if (id < 0 || id > 0x7F) return false;
+    if (id == 0x00 || id == 0x01) return false;                  // feet: Kind::Foot
+    if (id >= 0x08 && id <= 0x0F) return false;                  // V-Pot push
+    if (id >= 0x18 && id <= 0x1F) return false;                  // soft-keys
+    if (id >= 0x48 && id <= 0x4F) return false;                  // SEND/PLUG-IN
+    if (id >= 0x40 && id <= 0x42) return false;                  // LAYER 1..3
+    if (id == 0x46) return false;                                // 360
+    if (id >= 0x68 && id <= 0x6D) return false;                  // V-POT, 1..5
+    if (id == 0x52 || id == 0x53) return false;                  // PAGE < >
+    return true;
+}
+
+// The name of a key for Settings (keyAssignable ids, and the ones it refuses).
+inline std::string keyName(int id)
+{
+    if (id >= 0x20 && id <= 0x37) {
+        static const char* const t[3] = {"SOLO", "CUT", "SEL"};
+        return std::string(t[(id - 0x20) % 3]) + " " + std::to_string((id - 0x20) / 3 + 1);
+    }
+    switch (id) {
+        case 0x43: return "QUICK 1";   case 0x44: return "QUICK 2";   case 0x45: return "QUICK 3";
+        case 0x50: return "PLUGIN";    case 0x51: return "CHANNEL";   case 0x54: return "FLIP";
+        case 0x58: return "OFF";       case 0x59: return "READ";      case 0x5A: return "WRITE";
+        case 0x5B: return "TRIM";      case 0x5C: return "LATCH";     case 0x5D: return "TOUCH";
+        case 0x6E: return "PAN";       case 0x6F: return "FINE";
+        case 0x70: return "NORM";      case 0x71: return "REC";       case 0x72: return "AUTO";
+        case 0x73: return "NAV";       case 0x74: return "NUDGE";     case 0x75: return "FOCUS";
+        case 0x76: return "ENC PUSH";  case 0x78: return "BANK <";    case 0x79: return "BANK >";
+        case 0x7A: return "ZOOM UP";   case 0x7B: return "ZOOM LEFT"; case 0x7C: return "ZOOM CTR";
+        case 0x7D: return "ZOOM RIGHT"; case 0x7E: return "ZOOM DOWN";
+        default: break;
+    }
+    char b[16];
+    snprintf(b, sizeof(b), "key 0x%02X", id);
+    return b;
+}
+
 struct Layer {
     std::vector<std::string> outputs;   // device names; "" = REAPER's virtual MIDI keyboard
     std::string inputDevice;            // "" = none
@@ -110,6 +156,10 @@ struct Layer {
     // On the heap: bindings' Config is ~600 KB already and must never grow on a
     // stack (Windows load crash, twice). kPages entries, always.
     std::vector<Page> pages = std::vector<Page>(kPages);
+    // Every other key by its UF8 id (keyAssignable), on all pages; only assigned
+    // ones are kept. The channel encoder turns like a V-Pot.
+    std::map<int, Control> keys;
+    Control encoder;
 };
 
 // The colours a control can take (Control::colour), as RGB for the UF8's palette
@@ -363,6 +413,13 @@ struct State {
     int     value[kPages][kKindCount][kStrips] = {};
     bool    known[kPages][kKindCount][kStrips] = {};
     int64_t lastSendMs[kPages][kKindCount][kStrips] = {};
+    // The other keys (by UF8 id) and the channel encoder.
+    int     keyValue[128] = {};
+    bool    keyKnown[128] = {};
+    int64_t keySentMs[128] = {};
+    int     encValue = 0;
+    bool    encKnown = false;
+    int64_t encSentMs = 0;
 
     void forget() { *this = State{}; }
 
@@ -403,6 +460,49 @@ struct State {
         sentAt(p, k, i) = nowMs;
         return messagesFor(k, c, L.defaultChannel, newValue);
     }
+
+    // One of the other keys, pressed or released (Toggle / Hold as the soft-keys).
+    std::vector<Msg> keyLocal(const Layer& L, int id, bool pressed, int64_t nowMs)
+    {
+        auto it = L.keys.find(id);
+        if (id < 0 || id > 127 || it == L.keys.end() || !assigned(it->second)) return {};
+        int v = keyKnown[id] ? keyValue[id] : 0;
+        if (!keyEdge(it->second.behaviour, pressed, v)) return {};
+        keyValue[id] = v;
+        keyKnown[id] = true;
+        keySentMs[id] = nowMs;
+        return messagesFor(Kind::Soft, it->second, L.defaultChannel, v);
+    }
+    // The channel encoder, as a V-Pot.
+    std::vector<Msg> encoderLocal(const Layer& L, int detents, double speed, bool fine, int64_t nowMs)
+    {
+        if (!assigned(L.encoder)) return {};
+        const int cur = encKnown ? encValue : 0;
+        const int nv = vpotStep(cur, detents, speed, fine);
+        if (encKnown && nv == cur) return {};
+        encValue = nv;
+        encKnown = true;
+        encSentMs = nowMs;
+        return messagesFor(Kind::VPot, L.encoder, L.defaultChannel, nv);
+    }
+    // A CC from outside for the other keys and the encoder (the input device).
+    void applyKeys(const Layer& L, const Msg& m, int64_t nowMs)
+    {
+        if ((m.status & 0xF0) != 0xB0) return;
+        const int ch = (m.status & 0x0F) + 1;
+        for (const auto& [id, c] : L.keys)
+            if (assigned(c) && c.number == m.d1 && channelOf(c, L.defaultChannel) == ch
+                && !handWins(nowMs, keySentMs[id], false)) {
+                keyValue[id] = m.d2 & 0x7F;
+                keyKnown[id] = true;
+            }
+        if (assigned(L.encoder) && L.encoder.number == m.d1 && channelOf(L.encoder, L.defaultChannel) == ch
+            && !handWins(nowMs, encSentMs, false)) {
+            encValue = m.d2 & 0x7F;
+            encKnown = true;
+        }
+    }
+    bool keyLit(int id) const { return id >= 0 && id < 128 && keyKnown[id] && keyValue[id] >= 64; }
 };
 
 }  // namespace midicc

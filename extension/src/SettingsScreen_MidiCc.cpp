@@ -282,9 +282,67 @@ void drawCell_(ImGui_Context* ctx, const midicc::Control& c, Kind k, int i, int 
     if (pushed) ImGui_PopStyleColor(ctx, &pushed);
 }
 
+// The editor of one of the other keys (s_kind 100, s_index = UF8 id) or the
+// channel encoder (s_kind 101): the same on every page.
+constexpr int kSelKey = 100, kSelEncoder = 101;
+bool drawExtraEditor_(ImGui_Context* ctx, midicc::Layer& L)
+{
+    bool dirty = false;
+    const bool enc = s_kind == kSelEncoder;
+    midicc::Control& c = enc ? L.encoder : L.keys[s_index];
+    char hdr[96];
+    snprintf(hdr, sizeof(hdr), "%s, all pages", enc ? "Channel encoder" : midicc::keyName(s_index).c_str());
+    ImGui_Text(ctx, hdr);
+    ImGui_TextDisabled(ctx, enc ? "Without a CC the encoder keeps its normal job on this layer."
+                                : "Without a CC (-1) the key keeps its normal job on this layer.");
+    ImGui_Text(ctx, "Channel");
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    ImGui_SetNextItemWidth(ctx, 110.0);
+    {
+        int ch = c.channel;
+        if (ImGui_InputInt(ctx, "##cc_x_ch", &ch, nullptr, nullptr, nullptr)) { c.channel = std::clamp(ch, 0, 16); dirty = true; }
+        tip_(ctx, "0 = the layer's default channel.");
+    }
+    ImGui_Text(ctx, "CC number");
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    ImGui_SetNextItemWidth(ctx, 110.0);
+    {
+        int n = c.number;
+        if (ImGui_InputInt(ctx, "##cc_x_num", &n, nullptr, nullptr, nullptr)) { c.number = std::clamp(n, -1, 127); dirty = true; }
+        tip_(ctx, "0 to 127. -1 = no CC, the normal job.");
+    }
+    if (!enc) {
+        ImGui_Text(ctx, "Behaviour");
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        ImGui_SetNextItemWidth(ctx, 140.0);
+        const bool hold = c.behaviour == midicc::Behaviour::Hold;
+        if (ImGui_BeginCombo(ctx, "##cc_x_beh", hold ? "Hold" : "Toggle", nullptr)) {
+            bool sT = !hold, sH = hold;
+            if (ImGui_Selectable(ctx, "Toggle##cc_x_t", &sT, nullptr, nullptr, nullptr)) { c.behaviour = midicc::Behaviour::Toggle; dirty = true; }
+            if (ImGui_Selectable(ctx, "Hold##cc_x_h", &sH, nullptr, nullptr, nullptr)) { c.behaviour = midicc::Behaviour::Hold; dirty = true; }
+            ImGui_EndCombo(ctx);
+        }
+        tip_(ctx, hold ? "127 while held, 0 on release." : "0 and 127 in turn.");
+    }
+    ImGui_Text(ctx, "Name");
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    {
+        char buf[16];
+        snprintf(buf, 9, "%s", c.name.c_str());
+        int flags = 0;
+        ImGui_PushItemWidth(ctx, 120);
+        if (ImGui_InputText(ctx, "##cc_x_name", buf, 9, &flags, nullptr)) { c.name = buf; dirty = true; }
+        ImGui_PopItemWidth(ctx);
+        tip_(ctx, "8 characters, for Settings. Empty = the CC number.");
+    }
+    if (!enc && !midicc::assigned(c) && c.name.empty()) L.keys.erase(s_index);
+    return dirty;
+}
+
 // The editor of the selected control.
 bool drawControlEditor_(ImGui_Context* ctx, midicc::Layer& L, int page)
 {
+    if (s_kind == kSelKey || s_kind == kSelEncoder) return drawExtraEditor_(ctx, L);
     bool dirty = false;
     const Kind k = static_cast<Kind>(s_kind);
     if (s_index >= midicc::countOf(k)) s_index = 0;
@@ -386,6 +444,12 @@ bool drawControlEditor_(ImGui_Context* ctx, midicc::Layer& L, int page)
 }
 
 }  // namespace
+
+// The UF8 picture of a CC layer (SettingsScreen.cpp, drawUf8CcVirtual) picks the
+// control the editor below shows: kind 0..5 = midicc::Kind on the page, 100 = one
+// of the other keys (index = UF8 id), 101 = the channel encoder.
+void reasixty_ccSelect(int kind, int index) { s_kind = kind; s_index = index; }
+bool reasixty_ccIsSelected(int kind, int index) { return s_kind == kind && s_index == index; }
 
 // The row above the UF8 schematic: which layer is edited, and what it drives.
 // Returns true when the layer is a MIDI CC layer (the caller then draws the CC

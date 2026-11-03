@@ -207,6 +207,37 @@ int main()
         }
     }
 
+    // Every other key and the channel encoder (03.11.2026).
+    {
+        Layer L = factoryLayer();
+        L.defaultChannel = 2;
+        L.keys[0x20].number = 80;                                   // SOLO 1, toggle
+        L.keys[0x79].number = 81; L.keys[0x79].behaviour = Behaviour::Hold;
+        L.encoder.number = 90;
+        State S;
+        auto m = S.keyLocal(L, 0x20, true, 100);
+        EXPECT(m.size() == 1 && m[0].status == 0xB1 && m[0].d1 == 80 && m[0].d2 == 127 && S.keyLit(0x20));
+        EXPECT(S.keyLocal(L, 0x20, false, 110).empty());           // toggle: release sends nothing
+        m = S.keyLocal(L, 0x20, true, 120);
+        EXPECT(m.size() == 1 && m[0].d2 == 0 && !S.keyLit(0x20));
+        m = S.keyLocal(L, 0x79, true, 130);
+        EXPECT(m.size() == 1 && m[0].d1 == 81 && m[0].d2 == 127);
+        m = S.keyLocal(L, 0x79, false, 140);
+        EXPECT(m.size() == 1 && m[0].d2 == 0);
+        EXPECT(S.keyLocal(L, 0x21, true, 150).empty());           // no CC: nothing
+        m = S.encoderLocal(L, 3, 1.0, true, 160);
+        EXPECT(m.size() == 1 && m[0].d1 == 90 && m[0].d2 == 3);
+        m = S.encoderLocal(L, -5, 1.0, true, 170);
+        EXPECT(m.size() == 1 && m[0].d2 == 0);
+        // From outside, after the echo window.
+        S.applyKeys(L, Msg{0xB1, 80, 100}, 1000);
+        EXPECT(S.keyLit(0x20) && S.keyValue[0x20] == 100);
+        S.applyKeys(L, Msg{0xB1, 90, 64}, 1000);
+        EXPECT(S.encKnown && S.encValue == 64);
+        S.applyKeys(L, Msg{0xB0, 80, 0}, 1000);                    // other channel: ignored
+        EXPECT(S.keyValue[0x20] == 100);
+    }
+
     if (g_fail) { std::printf("%d failure(s)\n", g_fail); return 1; }
     std::printf("midi_cc_layer: all passed\n");
     return 0;

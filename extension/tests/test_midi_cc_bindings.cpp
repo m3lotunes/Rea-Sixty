@@ -57,6 +57,11 @@ int main()
     cc.pages[4].foot[1].number = 66;
     cc.pages[4].foot[1].behaviour = midicc::Behaviour::Hold;
     cc.pages[0].vpot[2].number = -1;                     // unassigned survives too
+    // Every other key and the channel encoder (03.11.2026); LAYER keys are refused on load.
+    cc.keys[0x20].number = 80; cc.keys[0x20].behaviour = midicc::Behaviour::Hold; cc.keys[0x20].name = "Solo1";
+    cc.keys[0x79].number = 81;
+    cc.keys[0x51].number = -1;                           // unassigned: not written
+    cc.encoder.number = 90; cc.encoder.channel = 3;
     bnd::setCcLayer(1, cc);
 
     // Not on it yet.
@@ -84,6 +89,13 @@ int main()
     EXPECT(r.pages[4].foot[1].number == 66 && r.pages[4].foot[1].behaviour == midicc::Behaviour::Hold);
     EXPECT(r.pages[0].vpot[2].number == -1);
     EXPECT(r.pages[0].fader[1].number == 11);            // untouched factory entries
+    EXPECT(r.keys.size() == 2 && r.keys.count(0x20) && r.keys.count(0x79));
+    EXPECT(r.keys.at(0x20).number == 80 && r.keys.at(0x20).behaviour == midicc::Behaviour::Hold
+           && r.keys.at(0x20).name == "Solo1");
+    EXPECT(r.keys.at(0x79).number == 81);
+    EXPECT(r.encoder.number == 90 && r.encoder.channel == 3);
+    EXPECT(!midicc::keyAssignable(0x40) && !midicc::keyAssignable(0x46) && !midicc::keyAssignable(0x68)
+           && !midicc::keyAssignable(0x18) && midicc::keyAssignable(0x22) && midicc::keyAssignable(0x76));
 
     // Back to Reaper: the set stays, on disk too.
     bnd::setLayerKind(1, bnd::LayerKind::Reaper);

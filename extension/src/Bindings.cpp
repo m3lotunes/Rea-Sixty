@@ -2110,7 +2110,37 @@ void serializeCcLayer_(const midicc::Layer& L, std::ostringstream& os, const cha
         }
         os << "}";
     }
-    os << "]}";
+    os << "]";
+    // Every other key (by UF8 id) and the channel encoder, only when assigned.
+    auto ctl = [&](const midicc::Control& c) {
+        os << "\"ch\": " << c.channel << ", \"n\": " << c.number
+           << ", \"hr\": " << (c.hiRes ? "true" : "false")
+           << ", \"beh\": \"" << (c.behaviour == midicc::Behaviour::Hold ? "hold" : "toggle")
+           << "\", \"name\": ";
+        appendEscaped(os, c.name);
+        os << ", \"col\": " << c.colour;
+    };
+    bool anyKey = false;
+    for (const auto& [id, c] : L.keys) anyKey = anyKey || midicc::assigned(c);
+    if (anyKey) {
+        os << ",\n" << pad << "  \"keys\": [";
+        bool first = true;
+        for (const auto& [id, c] : L.keys) {
+            if (!midicc::assigned(c)) continue;
+            if (!first) os << ", ";
+            first = false;
+            os << "{\"id\": " << id << ", ";
+            ctl(c);
+            os << "}";
+        }
+        os << "]";
+    }
+    if (midicc::assigned(L.encoder)) {
+        os << ",\n" << pad << "  \"encoder\": {";
+        ctl(L.encoder);
+        os << "}";
+    }
+    os << "}";
 }
 
 void serializeCcPresets_(const Config& c, std::ostringstream& os)
@@ -3165,6 +3195,30 @@ void parseCcLayer_(wdl_json_element* o, midicc::Layer& out)
         if (auto* t = v->get_string_value()) out.inputDevice = t;
     out.followItems    = flag(o, "follow_items", out.followItems);
     out.defaultChannel = std::clamp(num(o, "default_channel", out.defaultChannel), 1, 16);
+    auto readCtl = [&](wdl_json_element* co, midicc::Control& c) {
+        c.channel = std::clamp(num(co, "ch", c.channel), 0, 16);
+        c.number  = std::clamp(num(co, "n", c.number), -1, 127);
+        c.hiRes   = flag(co, "hr", c.hiRes);
+        if (auto* v = co->get_item_by_name("beh"))
+            if (auto* t = v->get_string_value())
+                c.behaviour = std::strcmp(t, "hold") == 0 ? midicc::Behaviour::Hold : midicc::Behaviour::Toggle;
+        if (auto* v = co->get_item_by_name("name"))
+            if (auto* t = v->get_string_value()) c.name = t;
+        c.colour  = num(co, "col", c.colour);
+    };
+    if (auto* a = o->get_item_by_name("keys"); a && a->is_array() && a->m_array) {
+        out.keys.clear();
+        for (int i = 0; i < a->m_array->GetSize(); ++i) {
+            wdl_json_element* co = a->enum_item(i);
+            if (!co || !co->is_object()) continue;
+            const int id = num(co, "id", -1);
+            if (!midicc::keyAssignable(id)) continue;
+            midicc::Control c;
+            readCtl(co, c);
+            if (midicc::assigned(c)) out.keys[id] = c;
+        }
+    }
+    if (auto* e = o->get_item_by_name("encoder"); e && e->is_object()) readCtl(e, out.encoder);
     auto* pages = o->get_item_by_name("pages");
     if (!pages || !pages->is_array() || !pages->m_array) return;
     // Five pages = written before the V-POT page existed (27.10.2026): they were

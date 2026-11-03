@@ -6856,6 +6856,8 @@ struct PendingInput {
         CcVPot,          // strip = V-Pot, value = signed detents
         CcKey,           // strip = midicc::Kind << 4 | index, value = 1 press / 0 release
         CcPage,          // strip 0 = go to page `value`, 1 = step by `value`
+        CcExtraKey,      // strip = UF8 key id (midicc::keyAssignable), value = 1 press / 0 release
+        CcEncoder,       // value = signed detents of the channel encoder
     };
     Kind    kind;
     uint8_t strip;
@@ -23154,6 +23156,22 @@ void switchProjectState_()
 // ccApplyInput_ turns them into values and MIDI. ccTick_ keeps the copy of the
 // active CC layer current, ccPaintSurface_ shows it (both beside the painter).
 static midicc::State    g_ccState;
+// Which of the other keys, and whether the channel encoder, carry a CC on the
+// active CC layer: the USB thread reads these to decide what is the layer's.
+static std::array<std::atomic<bool>, 128> g_ccKeyAssigned{};
+static std::atomic<bool> g_ccEncAssigned{false};
+static void ccPublishAssigned_(const midicc::Layer* L)
+{
+    for (int id = 0; id < 128; ++id) {
+        bool on = false;
+        if (L) {
+            auto it = L->keys.find(id);
+            on = it != L->keys.end() && midicc::assigned(it->second) && midicc::keyAssignable(id);
+        }
+        g_ccKeyAssigned[static_cast<std::size_t>(id)].store(on);
+    }
+    g_ccEncAssigned.store(L && midicc::assigned(L->encoder));
+}
 static midicc::Layer    g_ccLayer;            // copy of the active CC layer
 static int              g_ccIdx  = -1;        // its index, -1 = not on a CC layer
 static uint64_t         g_ccGen  = ~0ull;     // bindings generation of the copy
@@ -23279,6 +23297,12 @@ static void ccApplyInput_(const PendingInput& e)
         if (keyEdge(c.behaviour, pressed, v)) ccSend_(S.localOn(L, p, k, i, v, now));
         break;
     }
+    case PendingInput::CcExtraKey:
+        ccSend_(S.keyLocal(L, e.strip, e.value > 0.5, now));
+        break;
+    case PendingInput::CcEncoder:
+        ccSend_(S.encoderLocal(L, static_cast<int>(e.value), g_knobSpeedUf8.load(), shiftHeldAnywhere_(), now));
+        break;
     case PendingInput::CcPage:
         // strip 0 / 2: page key on the left / right unit (the right unit's key
         // picks its own page, the left follows one below), 1: PAGE < > by one.
@@ -23308,7 +23332,7 @@ void drainInputQueue()
     const int surfaceCount  = visibleTrackCount();
     const int bankOffset    = g_bankOffset.load();
     for (const auto& e : local) {
-        if (e.kind >= PendingInput::CcFader && e.kind <= PendingInput::CcPage) {
+        if (e.kind >= PendingInput::CcFader && e.kind <= PendingInput::CcEncoder) {
             ccApplyInput_(e);
             continue;
         }
@@ -27826,6 +27850,9 @@ static void onUf8InputUnit_(const uint8_t* dataIn, size_t lenIn, int unit)
                                              double(id - 0x68)});
                 } else if (id == 0x52 || id == 0x53) {        // PAGE < >
                     if (pressed) queueInput({PendingInput::CcPage, 1, id == 0x52 ? -1.0 : 1.0});
+                } else if (g_ccKeyAssigned[id & 0x7F].load()) {   // a key with its own CC
+                    if (!(btnWoke && pressed))
+                        queueInput({PendingInput::CcExtraKey, id, pressed ? 1.0 : 0.0});
                 } else {
                     switch (id) {
                         case 0x6F: case 0x73: case 0x74: case 0x75: case 0x76: // Fine, Nav, Nudge, Focus, channel push
@@ -28910,6 +28937,12 @@ static void onUf8InputUnit_(const uint8_t* dataIn, size_t lenIn, int unit)
             // encoder, stays with REAPER and falls through.
             if (hwPot < 8 && uf8CcOwnsUnit_(unit)) {
                 queueInput({PendingInput::CcVPot, strip, static_cast<double>(signed6)});
+                i += frameSize;
+                continue;
+            }
+            // The channel encoder, when the CC layer gave it a controller.
+            if (hwPot == 8 && uf8CcOwnsUnit_(unit) && g_ccEncAssigned.load()) {
+                queueInput({PendingInput::CcEncoder, 8, static_cast<double>(signed6)});
                 i += frameSize;
                 continue;
             }
@@ -40878,6 +40911,7 @@ static void ccTick_()
             g_ccGen = gen;
             ccResolveOutputs_();
         }
+        ccPublishAssigned_(idx >= 0 ? &g_ccLayer : nullptr);
         if (left) {
             g_ccRightPage.store(-1);
             uf8ResetStripState_(8, kUf8MaxStrips);   // the right UF8 had the layer
@@ -40894,6 +40928,7 @@ static void ccTick_()
         g_ccLayer = uf8::bindings::ccLayer(idx);
         g_ccGen = gen;
         ccResolveOutputs_();
+        ccPublishAssigned_(&g_ccLayer);
         g_ccRepaint = true;
     }
 }
@@ -41063,6 +41098,7 @@ static void ccInputTick_(int64_t now)
                             static_cast<uint8_t>(ev->size > 2 ? ev->midi_message[2] : 0)};
         for (const auto& h : midicc::match(g_ccLayer, m, g_ccAsm))
             g_ccState.apply(h, now, ccTouched_(h.page, h.kind, h.index));
+        g_ccState.applyKeys(g_ccLayer, m, now);
     }
 }
 
@@ -41196,6 +41232,8 @@ static void ccPaintSurface_()
             v.topKeyRgb = colourRgb(sc);
             v.sel       = fOn;
             v.selRgb    = colourRgb(fc);
+            v.solo      = S.keyLit(0x20 + l * 3);    // SOLO / CUT with their own CC
+            v.cut       = S.keyLit(0x21 + l * 3);
             v.drive     = fOn && fKnown;
             v.faderPb   = v.drive ? static_cast<uint16_t>(valueToFader(fv, hiResActive(fk, fc))) : 0;
             bool engaged = g_faderMotorEngaged[s].load();
@@ -55959,6 +55997,19 @@ void reasixty_ccVirtualPageStep(int delta)
 {
     queueInput({PendingInput::CcPage, 1, static_cast<double>(delta)});
 }
+void reasixty_ccVirtualExtraKey(int id, bool pressed)
+{
+    queueInput({PendingInput::CcExtraKey, static_cast<uint8_t>(id), pressed ? 1.0 : 0.0});
+}
+void reasixty_ccVirtualEncoder(int detents)
+{
+    queueInput({PendingInput::CcEncoder, 8, static_cast<double>(detents)});
+}
+int  reasixty_ccKeyValue(int id)
+{
+    return (id >= 0 && id < 128 && g_ccState.keyKnown[id]) ? g_ccState.keyValue[id] : -1;
+}
+int  reasixty_ccEncoderValue() { return g_ccState.encKnown ? g_ccState.encValue : -1; }
 // The value the layer holds for a control on the live page, -1 = not known yet.
 int  reasixty_ccValue(int kind, int idx)
 {
