@@ -2547,10 +2547,12 @@ void drawUf8UadVector(ImGui_Context* ctx)
             // PLUG-IN: the SEL channel's slots; a click opens one on the V-Pots.
             std::string pn = st.slotNames[k];
             if (pn.rfind("UAD ", 0) == 0) pn.erase(0, 4);
-            const std::string lbl = pn.empty() ? std::string(n) : shortName(pn, 6);
+            const std::string lbl = pn.empty() ? std::string(n)
+                                  : (st.slotWindow[k] ? "\xE2\x96\xA3" : "") + shortName(pn, 6);
             tile(x, y, 38, 22, lbl.c_str(),
                  pn.empty() ? std::string("slot ") + n + ": empty"
-                            : "slot " + std::string(n) + ": " + pn + "; click = its parameters on the V-Pots, again = back",
+                            : "slot " + std::string(n) + ": " + pn + "; click = its parameters on the V-Pots, again = back;"
+                              " hold 0.5 s = its window in UAD Console" + (st.slotWindow[k] ? " (open)" : ""),
                  !pn.empty(), st.pluginSlot == k, 0x48 + k);
             continue;
         }

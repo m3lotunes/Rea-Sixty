@@ -402,6 +402,28 @@ int main()
         EXPECT(std::fabs(r.model.devices[0].inputs[0].effects[2].params[0].norm - (before + 0.05)) < 1e-6);
         r.key(0x48 + 2);                                     // again = back to the overview
         EXPECT(r.surf.pluginSlot() == -1);
+        // Held 0.5 s: Console's window of the slot, not its parameters.
+        {
+            uadsurf::Out o;
+            r.surf.fromUf8(uf8sim::key(0x48 + 2, true), r.now, o);
+            r.surf.service(r.now + 200, o);
+            EXPECT(o.cmds.empty());
+            r.surf.service(r.now + 600, o);
+            EXPECT(o.cmds.size() == 1 && noNul(o.cmds[0]) ==
+                   "post /OpenWindow {\"type\": \"Plug-In\", \"path\":\"/devices/0/inputs/0/effects/2\"}");
+            r.surf.fromUf8(uf8sim::key(0x48 + 2, false), r.now + 700, o);
+            EXPECT(r.surf.pluginSlot() == -1);               // the hold did not open the parameters
+            // The engine's relay marks it open; the next hold closes it.
+            r.model.onMessage("{\"path\": \"/OpenWindow\", \"data\": {\"type\": \"Plug-In\", \"path\": \"/devices/0/inputs/0/effects/2\"}}");
+            EXPECT(r.model.windowOpen("/devices/0/inputs/0/effects/2"));
+            uadsurf::Out o2;
+            r.surf.fromUf8(uf8sim::key(0x48 + 2, true), r.now + 1000, o2);
+            r.surf.service(r.now + 1600, o2);
+            EXPECT(o2.cmds.size() == 1 && noNul(o2.cmds[0]).rfind("post /CloseWindow ", 0) == 0);
+            r.surf.fromUf8(uf8sim::key(0x48 + 2, false), r.now + 1700, o2);
+            r.model.onMessage("{\"path\": \"/CloseWindow\", \"data\": {\"type\": \"Plug-In\", \"path\": \"/devices/0/inputs/0/effects/2\"}}");
+            EXPECT(!r.model.windowOpen("/devices/0/inputs/0/effects/2"));
+        }
         EXPECT(uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/Power"));
         EXPECT(uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/parameters/0/NormalizedValue"));
         EXPECT(!uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/parameters/0/StringValue"));

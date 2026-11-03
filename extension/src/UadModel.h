@@ -18,6 +18,7 @@
 // Properties a node does not report keep their defaults (the engine leaves out
 // "value" on some, measured 02.11.2026 on the user's Mac).
 //
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -119,7 +120,11 @@ public:
 
     std::vector<Device> devices;
     bool talkbackOn = false;         // /TalkbackOn, the Console's TALKBACK button
-    std::uint32_t gen = 0;           // bumped by every change
+    // Plug-in windows the engine relayed as opened ("/OpenWindow") and not yet as
+    // closed ("/CloseWindow"), by effect path. Measured 03.11.2026: the engine
+    // passes every client's post on to all clients, Console opens the window.
+    std::vector<std::string> openWindows;
+    bool windowOpen(const std::string& effectPath) const;    std::uint32_t gen = 0;           // bumped by every change
 
     // The channels in Console order: per device the visible inputs (Active, enabled
     // by the user, not hidden; a stereo pair once), then its auxes.

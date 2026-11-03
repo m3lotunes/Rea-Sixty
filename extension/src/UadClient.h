@@ -81,6 +81,7 @@ struct Status {
     int         pluginSlot = -1, paramPage = 0;
     std::string pluginSlotName;        // the open slot's plug-in, empty = overview
     std::string slotNames[8];          // the SEL channel's insert slots, "" = empty
+    bool        slotWindow[8] = {};    // their window open in Console (as relayed)
     struct Pot { std::string label, value; double norm = 0.0; bool has = false, on = false; };
     Pot         pots[8];
     int         send = 0;              // the send SEND/PLUG-IN picked

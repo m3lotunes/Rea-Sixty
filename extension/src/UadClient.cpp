@@ -349,7 +349,10 @@ Status Side::status()
     if (sel >= 0 && sel < static_cast<int>(view.size())) {
         const uad::Strip& s = view[static_cast<std::size_t>(sel)];
         if (const uad::Input* sin = model_.input(s)) {
-            for (std::size_t k = 0; k < sin->effects.size() && k < 8; ++k) st.slotNames[k] = sin->effects[k].name;
+            for (std::size_t k = 0; k < sin->effects.size() && k < 8; ++k) {
+                st.slotNames[k] = sin->effects[k].name;
+                st.slotWindow[k] = model_.windowOpen(uad::Model::propPath(s, "effects/") + std::to_string(k));
+            }
             if (st.pluginSlot >= 0 && st.pluginSlot < static_cast<int>(sin->effects.size()))
                 st.pluginSlotName = sin->effects[static_cast<std::size_t>(st.pluginSlot)].name;
         }

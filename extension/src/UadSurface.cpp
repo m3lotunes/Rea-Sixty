@@ -333,6 +333,19 @@ void Surface::key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out)
 {
     if (id == 0x6F) { fine_ = pressed; return; }                // FINE
     if (id >= 0x18 && id <= 0x1F) { soft_(id - 0x18, pressed, now, out); return; }
+    if (!pressed && id >= 0x48 && id <= 0x4F && spKey_ == id - 0x48) {   // PLUG-IN key released
+        const int k = spKey_;
+        spKey_ = -1;
+        if (spFired_ || mode_ != PotMode::Plugin) return;
+        const uad::Input* in = selIn_();
+        if (slot_ == k) { slot_ = -1; return; }
+        if (in && k < static_cast<int>(in->effects.size()) && !in->effects[static_cast<std::size_t>(k)].name.empty()) {
+            slot_ = k;
+            paramPage_ = 0;
+            out.cmds.push_back(uad::get(slotPath_(k)));   // its parameters, read afresh
+        }
+        return;
+    }
     if (!pressed) return;
     if (id >= 0x20 && id <= 0x37) {                             // SOLO / CUT / SEL
         const int s = (id - 0x20) / 3, type = (id - 0x20) % 3;
@@ -371,14 +384,12 @@ void Surface::key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out)
     }
     if (id >= 0x68 && id < 0x68 + kSoftBanks) { softBank_ = id - 0x68; return; }
     if (id >= 0x48 && id <= 0x4F && mode_ == PotMode::Plugin) {  // PLUG-IN: open / close a slot
+        // Short: the slot's parameters on the V-Pots (on release). Held: the
+        // plug-in's window in Console (service fires it at kWindowHoldMs).
         const int k = id - 0x48;
-        const uad::Input* in = selIn_();
-        if (slot_ == k) { slot_ = -1; return; }
-        if (in && k < static_cast<int>(in->effects.size()) && !in->effects[static_cast<std::size_t>(k)].name.empty()) {
-            slot_ = k;
-            paramPage_ = 0;
-            out.cmds.push_back(uad::get(slotPath_(k)));   // its parameters, read afresh
-        }
+        spKey_ = k;
+        spDownMs_ = now;
+        spFired_ = false;
         return;
     }
     if (id == 0x52 || id == 0x53) {                             // PAGE < >: parameter pages
@@ -583,7 +594,25 @@ void Surface::service(std::int64_t now, Out& out)
                 toggle_(uad::Model::propPath(st, "preamps/0/48V"), in->preamp.phantom, now, out);
         }
     }
+    if (spKey_ >= 0 && !spFired_ && now - spDownMs_ >= kWindowHoldMs && mode_ == PotMode::Plugin) {
+        spFired_ = true;
+        toggleWindow_(spKey_, out);
+    }
     flush_(now, out);
+}
+
+// Console's plug-in window of slot k of the SEL channel, open or closed (the
+// engine's own post commands, measured from UA Midi Control 03.11.2026). Only a
+// window: nothing in the mixer changes, so it goes out offline too.
+void Surface::toggleWindow_(int k, Out& out)
+{
+    const uad::Input* in = selIn_();
+    if (!in || k < 0 || k >= static_cast<int>(in->effects.size()) || in->effects[static_cast<std::size_t>(k)].name.empty())
+        return;
+    const std::string path = slotPath_(k);
+    const bool open = m_.windowOpen(path);
+    out.cmds.push_back(uad::command("post", std::string(open ? "/CloseWindow" : "/OpenWindow")
+                                    + " {\"type\": \"Plug-In\", \"path\":\"" + path + "\"}"));
 }
 
 void Surface::paint(std::int64_t now, Out& out)

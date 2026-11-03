@@ -42,7 +42,8 @@ enum class PotMode : std::uint8_t { Pan, Send, Preamp, Plugin };
 constexpr int kTouchQuietMs = 150;   // main.cpp's kTouchDebounceQuiet
 constexpr int kWriteMs      = 16;    // one write per path per window [Ref: open-apollo]
 constexpr int kHandHoldMs   = 350;   // the hand wins over the engine's echo this long
-constexpr int kTalkHoldMs = 400;     // TALK held this long = talk only while held
+constexpr int kTalkHoldMs = 500;     // TALK held this long = talk only while held (UA manual: 0.5 s)
+constexpr int kWindowHoldMs = 500;   // SEND/PLUG-IN held this long in PLUG-IN mode = the plug-in's window
 constexpr int kPhantomHoldMs = 500;  // 48V only after holding the key this long
 constexpr int kSoftBanks    = 3;     // V-POT (modes), 1 Monitor, 2 Preamp
 
@@ -153,6 +154,10 @@ private:
     std::array<int, 2> quickBank_{};           // each view keeps its own bank
     int          slot_ = -1, paramPage_ = 0;   // PLUG-IN: edited slot, parameter page
     bool         touchSelects_ = false;
+    int          spKey_ = -1;                  // SEND/PLUG-IN key held in PLUG-IN mode
+    std::int64_t spDownMs_ = 0;
+    bool         spFired_ = false;             // its hold already toggled the window
+    void toggleWindow_(int k, Out& out);
     PotMode      beforePlugin_ = PotMode::Pan; // the PLUGIN key returns here
 };
 

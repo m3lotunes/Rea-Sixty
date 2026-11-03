@@ -171,6 +171,17 @@ std::vector<std::string> Model::onMessage(const std::string& json)
     const std::vector<std::string> seg = split(path);
     if (seg.empty()) return {};
 
+    // A plug-in window opened or closed, as the engine relays it to every client.
+    if (seg.size() == 1 && (seg[0] == "OpenWindow" || seg[0] == "CloseWindow") && data->is_object()) {
+        const char* p = data->get_string_by_name("path");
+        if (!p || !*p) return {};
+        const std::string ep = p;
+        auto it = std::find(openWindows.begin(), openWindows.end(), ep);
+        if (seg[0] == "OpenWindow" && it == openWindows.end()) { openWindows.push_back(ep); ++gen; }
+        if (seg[0] == "CloseWindow" && it != openWindows.end()) { openWindows.erase(it); ++gen; }
+        return {};
+    }
+
     // The root's talkback switch: "/TalkbackOn" (get) or "/TalkbackOn/value".
     if (seg[0] == "TalkbackOn" && (seg.size() == 1 || (seg.size() == 2 && seg[1] == "value"))) {
         if (setBool(talkbackOn, data)) ++gen;
@@ -482,6 +493,11 @@ std::string Model::stripPath(const Strip& s)
 }
 
 std::string Model::propPath(const Strip& s, const char* prop) { return stripPath(s) + "/" + prop; }
+
+bool Model::windowOpen(const std::string& effectPath) const
+{
+    return std::find(openWindows.begin(), openWindows.end(), effectPath) != openWindows.end();
+}
 
 std::string Model::stripId(const Strip& s)
 {

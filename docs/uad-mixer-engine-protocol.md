@@ -105,6 +105,22 @@ Requests have the form `<verb> <path>[ <value>]\0` with verbs `get`, `set`, `sub
 - MCP's monitor rail: ceiling −6 dB, at most +6 dB per write and +10 dB per 30 s. It treats unmute and un-dim as level jumps, and allows at most 10 writes/s (SPEC.md:215-238; safety.py:42-47).
 - OA coalesces writes into 16 ms windows and ignores engine echoes for 350 ms after a local write, so a moving fader is not pulled back (ue/src/writer.rs:6-7; ue/README.md:64).
 
+### Plug-in windows (measured on the user's Mac, 03.11.2026)
+
+Captured on lo0 while UA Midi Control 5.11.2 opened and closed the window of the
+Unison plug-in on ANALOG 1 (engine 11.8.2, Apollo offline):
+
+- `post /OpenWindow {"type": "Plug-In", "path":"/devices/0/inputs/0/preamps/0/effects/0"}`
+- `post /CloseWindow {"type": "Plug-In", "path":"/devices/0/inputs/0/preamps/0/effects/0"}`
+
+The engine answers the sender with `{"path": "/OpenWindow", "data": {}}` and relays
+`{"path": "/OpenWindow", "data": {"type": "Plug-In", "path": ...}}` to every other
+client, Console included, which opens the editor. `…/effects/K/Window` is not a
+property (`get` answers "Unable to resolve path"). A window opened with the mouse in
+Console was not seen relayed, so a client only knows the windows it saw opened.
+UA Midi Control also has Channel Strip and Console windows; their `type` strings
+are not measured yet.
+
 ## 5. Tapers
 
 - **Faders** (input, aux and send `GainTapered`):
