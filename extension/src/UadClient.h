@@ -86,7 +86,13 @@ struct Status {
         bool   aux = false, stereo = false, preamp = false;
         bool   mute = false, solo = false, phantom = false;
         double faderDb = -144.0, faderTapered = 0.0, pan = 0.0, gainDb = 0.0;
+        // The send SEND/PLUG-IN picked (Status::send), when the channel has it.
+        bool   hasSend = false, sendBypass = false;
+        double sendDb = -144.0, sendTapered = 0.0;
     };
+    // The monitor output the CHANNEL encoder turns (first device that has one).
+    bool   hasMonitor = false, monitorMute = false;
+    double monitorDb = -96.0, monitorMinDb = -96.0, monitorMaxDb = 0.0;
     std::vector<Channel> list;
     std::uint32_t sent = 0;            // set commands sent to the engine so far
 };

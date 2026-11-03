@@ -2395,7 +2395,10 @@ void drawUf8UadVector(ImGui_Context* ctx)
                 } else if (st.mode == 2 && ch->preamp) {
                     snprintf(val, sizeof(val), "Gain %+.0f", ch->gainDb);
                 } else if (st.mode == 1 && !ch->aux) {
-                    snprintf(val, sizeof(val), "Send %d", st.send + 1);
+                    if (!ch->hasSend)        snprintf(val, sizeof(val), "Send %d", st.send + 1);
+                    else if (ch->sendBypass) snprintf(val, sizeof(val), "S%d off", st.send + 1);
+                    else if (ch->sendDb <= -143.5) snprintf(val, sizeof(val), "S%d -inf", st.send + 1);
+                    else snprintf(val, sizeof(val), "S%d %+.1f", st.send + 1, ch->sendDb);
                 }
                 if (*val) drawTextCentered_(c, sx + kStripW / 2.0f, 89, 0xC8B070FF, val);
                 ImGui_PopFont(ctx);
@@ -2411,8 +2414,16 @@ void drawUf8UadVector(ImGui_Context* ctx)
                 s_dragPot == i ? 0xAACCFFFF : vHot ? 0x6688AAFF : 0x4A5060FF);
         circle_(c, vx, vy, 14, 0x2A3038FF, 0x555A66FF);
         {
-            const float a = (st.mode == 0 && ch && !ch->aux)
-                          ? static_cast<float>(std::clamp(ch->pan, -1.0, 1.0)) * 2.356f : 0.0f;
+            // Pan from the centre; send level and preamp gain from the left stop.
+            float a = 0.0f;
+            if (ch && !ch->aux) {
+                if (st.mode == 0)
+                    a = static_cast<float>(std::clamp(ch->pan, -1.0, 1.0)) * 2.356f;
+                else if (st.mode == 1 && ch->hasSend)
+                    a = (static_cast<float>(std::clamp(ch->sendTapered, 0.0, 1.0)) * 2.0f - 1.0f) * 2.356f;
+                else if (st.mode == 2 && ch->preamp)
+                    a = (static_cast<float>(std::clamp(ch->gainDb, 0.0, 65.0) / 65.0) * 2.0f - 1.0f) * 2.356f;
+            }
             line_(c, vx + std::sin(a) * 8.0f, vy - std::cos(a) * 8.0f,
                   vx + std::sin(a) * 16.0f, vy - std::cos(a) * 16.0f, 0xCCCCCCFF, 2.0);
         }
@@ -2544,9 +2555,23 @@ void drawUf8UadVector(ImGui_Context* ctx)
                 s_dragPot == 8 ? 0xAACCFFFF : hot ? 0x6688AAFF : 0x6FA86FFF);
         circle_(c, cx, cy, r - 3, 0x252A33FF, 0x555A66FF);
         circle_(c, cx, cy, r * 0.78f, 0x383C44FF, 0x6A6E78FF);
-        line_(c, cx, cy - r * 0.95f, cx, cy - r * 0.62f, 0xE0E0E0FF, 2.5);
+        // The pointer stands where the monitor level stands in the engine's range.
+        float a = 0.0f;
+        if (st.hasMonitor && st.monitorMaxDb > st.monitorMinDb) {
+            const double t = (std::clamp(st.monitorDb, st.monitorMinDb, st.monitorMaxDb) - st.monitorMinDb)
+                           / (st.monitorMaxDb - st.monitorMinDb);
+            a = (static_cast<float>(t) * 2.0f - 1.0f) * 2.356f;
+        }
+        line_(c, cx + std::sin(a) * r * 0.62f, cy - std::cos(a) * r * 0.62f,
+              cx + std::sin(a) * r * 0.95f, cy - std::cos(a) * r * 0.95f, 0xE0E0E0FF, 2.5);
         ImGui_PushFont(ctx, nullptr, 10.0);
         drawTextCentered_(c, cx, 154, 0x9CA0AAFF, "MONITOR");
+        if (st.hasMonitor) {
+            char mv[24];
+            if (st.monitorMute) snprintf(mv, sizeof(mv), "MUTE");
+            else snprintf(mv, sizeof(mv), "%.1f dB", st.monitorDb);
+            drawTextCentered_(c, cx, cy, st.monitorMute ? 0xE05050FF : 0xC8B070FF, mv);
+        }
         ImGui_PopFont(ctx);
         if (hot) {
             hoverDesc = "CHANNEL encoder: drag up/down = monitor level, 1 dB per detent (FINE: 0.5 dB); click = push (monitor mute)";

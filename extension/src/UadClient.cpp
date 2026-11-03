@@ -300,6 +300,17 @@ Status Side::status()
     st.softBank = surf_.softBank();
     st.mode     = static_cast<int>(surf_.mode());
     st.send     = surf_.send();
+    for (const uad::Device& D : model_.devices) {
+        const int o = D.monitorOutput();
+        if (o < 0) continue;
+        const uad::Output& mon = D.outputs[static_cast<std::size_t>(o)];
+        st.hasMonitor   = true;
+        st.monitorMute  = mon.mute;
+        st.monitorDb    = mon.monitorDb;
+        st.monitorMinDb = mon.monitorMinDb;
+        st.monitorMaxDb = mon.monitorMaxDb;
+        break;
+    }
     for (int i = 0; i < 8; ++i) {
         const std::size_t idx = static_cast<std::size_t>(st.bank * 8 + i);
         if (idx < strips.size()) st.names[i] = model_.name(strips[idx]);
@@ -326,6 +337,13 @@ Status Side::status()
             ch.faderTapered = in->faderTapered;
             ch.pan = in->pan;
             ch.gainDb = in->preamp.gainDb;
+            if (st.send >= 0 && st.send < static_cast<int>(in->sends.size())) {
+                const uad::Send& sd = in->sends[static_cast<std::size_t>(st.send)];
+                ch.hasSend = true;
+                ch.sendBypass = sd.bypass;
+                ch.sendDb = sd.gainDb;
+                ch.sendTapered = sd.gainTapered;
+            }
         } else if (const uad::Aux* ax = model_.aux(s)) {
             ch.type = "AUX";
             ch.aux = true;
