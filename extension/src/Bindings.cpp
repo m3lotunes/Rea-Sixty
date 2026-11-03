@@ -2178,11 +2178,18 @@ void serializeLayerBody_(const Layer& L, std::ostringstream& os,
         os << fieldPad << "\"kind\": \"midi_cc\",\n";
     if (L.kind == LayerKind::Uad)
         os << fieldPad << "\"kind\": \"uad\",\n";
-    if (!L.uadQuick2.empty()) {
+    if (!L.uadQuick2.empty() || !L.uadColours.empty()) {
         os << fieldPad << "\"uad\": {\"quick2\": [";
         for (std::size_t i = 0; i < L.uadQuick2.size(); ++i) {
             if (i) os << ", ";
             appendEscaped(os, L.uadQuick2[i]);
+        }
+        os << "], \"colours\": [";
+        bool first = true;
+        for (const auto& [id, col] : L.uadColours) {
+            if (!first) os << ", ";
+            first = false;
+            os << "{\"id\": " << id << ", \"col\": " << col << "}";
         }
         os << "]},\n";
     }
@@ -3293,6 +3300,18 @@ bool parseLayer_(wdl_json_element* lobj, Layer& out)
             out.uadQuick2.clear();
             for (int i = 0; q->enum_item(i); ++i)
                 if (const char* s = q->enum_item(i)->get_string_value()) out.uadQuick2.emplace_back(s);
+        }
+        if (auto* q = v->get_item_by_name("colours"); q && q->is_array()) {
+            out.uadColours.clear();
+            for (int i = 0; q->enum_item(i); ++i) {
+                wdl_json_element* e = q->enum_item(i);
+                if (!e || !e->is_object()) continue;
+                const char* id = e->get_string_by_name("id", true);
+                const char* col = e->get_string_by_name("col", true);
+                if (!id || !col) continue;
+                const int k = std::atoi(id), c = std::atoi(col);
+                if (k >= 0 && k < 128 && c >= 0 && c < 8) out.uadColours[k] = c;
+            }
         }
     }
     if (auto* v = lobj->get_item_by_name("midi_cc"); v && v->is_object()) {
@@ -10195,6 +10214,23 @@ void setUadQuick2(int layer, const std::vector<std::string>& ids)
     std::lock_guard<std::mutex> lk(g_cfgMutex);
     if (g_cfg.layers[layer].uadQuick2 == ids) return;
     g_cfg.layers[layer].uadQuick2 = ids;
+    persistLocked_();
+}
+
+std::map<int, int> uadColours(int layer)
+{
+    if (layer < 0 || layer > 2) return {};
+    std::lock_guard<std::mutex> lk(g_cfgMutex);
+    return g_cfg.layers[layer].uadColours;
+}
+
+void setUadColour(int layer, int keyId, int colour)
+{
+    if (layer < 0 || layer > 2 || keyId < 0 || keyId > 127) return;
+    std::lock_guard<std::mutex> lk(g_cfgMutex);
+    auto& m = g_cfg.layers[layer].uadColours;
+    if (colour < 0) { if (!m.erase(keyId)) return; }
+    else { auto it = m.find(keyId); if (it != m.end() && it->second == colour) return; m[keyId] = colour; }
     persistLocked_();
 }
 

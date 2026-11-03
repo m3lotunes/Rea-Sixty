@@ -120,6 +120,33 @@ int Surface::stripAt_(int s) const
     return (s >= 0 && s < 8 && idx < static_cast<int>(strips_.size())) ? idx : -1;
 }
 
+namespace {
+// The UF8 key id behind a global lamp (the ids Settings stores colours under).
+int ledKeyId(uf8::Uf8GlobalLed led)
+{
+    using G = uf8::Uf8GlobalLed;
+    switch (led) {
+        case G::Layer1: return 0x40; case G::Layer2: return 0x41; case G::Layer3: return 0x42;
+        case G::Quick1: return 0x43; case G::Quick2: return 0x44; case G::Quick3: return 0x45;
+        case G::Btn360: return 0x46; case G::Plugin: return 0x50; case G::Channel: return 0x51;
+        case G::SendPlugin1: return 0x48; case G::SendPlugin2: return 0x49; case G::SendPlugin3: return 0x4A;
+        case G::SendPlugin4: return 0x4B; case G::SendPlugin5: return 0x4C; case G::SendPlugin6: return 0x4D;
+        case G::SendPlugin7: return 0x4E; case G::SendPlugin8: return 0x4F;
+        case G::PageLeft: return 0x52; case G::PageRight: return 0x53; case G::Flip: return 0x54;
+        case G::AutoOff: return 0x58; case G::AutoRead: return 0x59; case G::AutoWrite: return 0x5A;
+        case G::AutoTrim: return 0x5B; case G::AutoLatch: return 0x5C; case G::AutoTouch: return 0x5D;
+        case G::VPotBank: return 0x68; case G::Soft1: return 0x69; case G::Soft2: return 0x6A;
+        case G::Soft3: return 0x6B; case G::Soft4: return 0x6C; case G::Soft5: return 0x6D;
+        case G::Pan: return 0x6E; case G::Fine: return 0x6F; case G::Norm: return 0x70; case G::Rec: return 0x71;
+        case G::Auto: return 0x72; case G::Nav: return 0x73; case G::Nudge: return 0x74; case G::Focus: return 0x75;
+        case G::BankLeft: return 0x78; case G::BankRight: return 0x79;
+        case G::ZoomUp: return 0x7A; case G::ZoomLeft: return 0x7B; case G::ZoomCenter: return 0x7C;
+        case G::ZoomRight: return 0x7D; case G::ZoomDown: return 0x7E;
+    }
+    return -1;
+}
+}  // namespace
+
 void Surface::rebuildStrips_()
 {
     std::vector<uad::Strip> all = m_.strips();
@@ -665,7 +692,9 @@ void Surface::paint(std::int64_t now, Out& out)
                              : std::string();
             lower       = online ? potText_(idx, false) : "offline";
             v.sel       = idx == selected_;
-            v.selRgb    = 0xFFFFFF;
+            v.selRgb    = colourOf_(0x22 + s * 3, 0xFFFFFF);
+            v.soloRgb   = colourOf_(0x20 + s * 3, 0);
+            v.cutRgb    = colourOf_(0x21 + s * 3, 0);
             v.cut       = in ? in->mute : ax ? ax->mute : false;
             v.solo      = in ? in->solo : false;
             v.drive     = online;
@@ -747,7 +776,7 @@ void Surface::paint(std::int64_t now, Out& out)
             }
         }
         v.topKey    = lit < 0 ? 0 : lit;
-        v.topKeyRgb = softBank_ == 2 && s == 0 ? 0xFF2020 : 0xFFFFFF;    // 48V in red
+        v.topKeyRgb = colourOf_(0x18 + s, softBank_ == 2 && s == 0 ? 0xFF2020 : 0xFFFFFF);   // 48V red by default
 
         uf8strips::paintStrip(
             uf8strips::Cells{c.upper, c.csType, c.chanNum, c.faderText, c.faderUnit, c.valueLine,
@@ -774,12 +803,18 @@ void Surface::paint(std::int64_t now, Out& out)
     for (const auto& st : strips_) if (const uad::Input* in = m_.input(st)) { sendCount = static_cast<int>(in->sends.size()); break; }
     const int maxB = strips_.empty() ? 0 : (static_cast<int>(strips_.size()) - 1) / 8;
     auto lamp = [&](G led, int state) {
+        // The key's own colour unless Settings gave it one; the cache holds the
+        // state and a hash of that colour.
+        const std::uint32_t rgb = colourOf_(ledKeyId(led), 0);
+        const int h = rgb ? static_cast<int>(((rgb >> 18) ^ (rgb >> 12) ^ (rgb >> 6) ^ rgb) & 0x1F) : 0;
+        const std::int8_t key = static_cast<std::int8_t>(state | (h << 2));
         std::int8_t& last = lastGlobal_[static_cast<std::size_t>(led)];
-        if (last == state) return;
-        last = static_cast<std::int8_t>(state);
-        push(out, uf8::buildUf8GlobalLed(led, state == 2 ? uf8::GlobalLedState::Bright
-                                            : state == 1 ? uf8::GlobalLedState::Dim
-                                                         : uf8::GlobalLedState::Off));
+        if (last == key) return;
+        last = key;
+        const auto st = state == 2 ? uf8::GlobalLedState::Bright
+                      : state == 1 ? uf8::GlobalLedState::Dim : uf8::GlobalLedState::Off;
+        push(out, rgb ? uf8::buildUf8GlobalLed(led, st, uf8::ledColourForTrackRgb(rgb))
+                      : uf8::buildUf8GlobalLed(led, st));
     };
     const G banks[6] = {G::VPotBank, G::Soft1, G::Soft2, G::Soft3, G::Soft4, G::Soft5};
     for (int b = 0; b < 6; ++b) lamp(banks[b], b >= kSoftBanks ? 0 : b == softBank_ ? 2 : 1);

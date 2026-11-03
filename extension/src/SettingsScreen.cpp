@@ -2258,6 +2258,21 @@ void drawUf8UadVector(ImGui_Context* ctx)
                        &s_offlineTest);
     }
     const bool offTest = s_offlineTest && !st.online;
+    // Use the UF8, or set its key colours: a click then picks the key.
+    static bool s_colMode = false;
+    static int  s_colKey = -1;
+    {
+        int m = s_colMode ? 1 : 0;
+        if (ImGui_RadioButtonEx(ctx, "Use the UF8##uad_mode_use", &m, 0)) s_colMode = false;
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        if (ImGui_RadioButtonEx(ctx, "Set key colours: click a key##uad_mode_col", &m, 1)) s_colMode = true;
+    }
+    int uadLayer = -1;
+    if (uf8::bindings::layerKind(uf8::bindings::getQuickLayer()) == uf8::bindings::LayerKind::Uad)
+        uadLayer = uf8::bindings::getQuickLayer();
+    for (int l = 0; uadLayer < 0 && l < 3; ++l)
+        if (uf8::bindings::layerKind(l) == uf8::bindings::LayerKind::Uad) uadLayer = l;
+    const std::map<int, int> uadCol = uadLayer >= 0 ? uf8::bindings::uadColours(uadLayer) : std::map<int, int>{};
     {
         char line[160];
         if (st.online)
@@ -2319,6 +2334,24 @@ void drawUf8UadVector(ImGui_Context* ctx)
         const int key = static_cast<int>(x) * 10000 + static_cast<int>(y);
         const bool hot = inside(x, y, w, h);
         const bool clicked = hot && canvasClicked && leftBtn == 0;
+        if (s_colMode) {
+            // Colour mode: every key with a lamp can be picked, active or not.
+            if (clicked && uf8Key >= 0 && uf8Key != 0x76) s_colKey = uf8Key;
+            auto it = uf8Key >= 0 ? uadCol.find(uf8Key) : uadCol.end();
+            const std::uint32_t rgb = it != uadCol.end() ? midicc::kColours[it->second] : 0;
+            const bool picked = uf8Key >= 0 && uf8Key == s_colKey;
+            const uint32_t fill = rgb ? (((((rgb >> 16) & 0xFF) * 2 / 5) << 24) | (((((rgb >> 8) & 0xFF) * 2 / 5)) << 16)
+                                         | ((((rgb & 0xFF) * 2 / 5)) << 8) | 0xFF)
+                                      : (uf8Key >= 0 && uf8Key != 0x76 ? 0x252A33FF : 0x1A1E24FF);
+            const uint32_t border = picked ? 0xFFFFFFFF : rgb ? ((rgb << 8) | 0xFF) : 0x4A5060FF;
+            rect_(c, x, y, w, h, fill, border, 3.5);
+            ImGui_PushFont(ctx, nullptr, 10.0);
+            drawTextCentered_(c, x + w / 2.0f, y + h / 2.0f, uf8Key >= 0 ? 0xE0E4EAFF : 0x70747CFF, label);
+            ImGui_PopFont(ctx);
+            if (hot) hoverDesc = uf8Key < 0 || uf8Key == 0x76 ? std::string(label) + ": no lamp to colour"
+                                                               : std::string(label) + ": click to set its colour";
+            return false;
+        }
         if (clicked) { s_selKey = key; s_selDesc = std::string(label) + ": " + desc; }
         if (clicked && active && uf8Key >= 0) pressKey(uf8Key);
         const bool selected = key == s_selKey;
@@ -2330,9 +2363,18 @@ void drawUf8UadVector(ImGui_Context* ctx)
             if (hot) hoverDesc = std::string(label) + ": not used on the UAD layer";
             return clicked;
         }
+        // A colour set in colour mode tints the key, brighter while lit.
+        auto cit = uf8Key >= 0 ? uadCol.find(uf8Key) : uadCol.end();
+        const std::uint32_t krgb = cit != uadCol.end() ? midicc::kColours[cit->second] : 0;
+        auto tint = [&](int num, int den) {
+            return ((((krgb >> 16) & 0xFF) * num / den) << 24) | ((((krgb >> 8) & 0xFF) * num / den) << 16)
+                 | (((krgb & 0xFF) * num / den) << 8) | 0xFFu;
+        };
         const uint32_t fill = selected ? 0x4477CCFF : hot ? 0x3A4253FF
+                            : krgb ? (lit ? tint(3, 4) : tint(1, 3))
                             : lit ? 0x2F5A36FF : 0x2C3A2EFF;
-        const uint32_t border = selected ? 0xAACCFFFF : lit ? 0x7FD07FFF : 0x6FA86FFF;
+        const uint32_t border = selected ? 0xAACCFFFF : krgb ? ((krgb << 8) | 0xFF)
+                              : lit ? 0x7FD07FFF : 0x6FA86FFF;
         rect_(c, x, y, w, h, fill, border, 3.5);
         ImGui_PushFont(ctx, nullptr, 10.0);
         drawTextCentered_(c, x + w / 2.0f, y + h / 2.0f,
@@ -2440,7 +2482,7 @@ void drawUf8UadVector(ImGui_Context* ctx)
         // V-Pot.
         const float vx = sx + kStripW / 2.0f, vy = 124;
         const bool vHot = (has || st.mode == 3) && inside(vx - 18, vy - 18, 36, 36);
-        if (vHot && canvasClicked && leftBtn == 0) {
+        if (vHot && canvasClicked && leftBtn == 0 && !s_colMode) {
             s_dragPot = i; s_potY = my; s_potTurned = false;
         }
         circle_(c, vx, vy, 18, 0x14181EFF,
@@ -2487,7 +2529,7 @@ void drawUf8UadVector(ImGui_Context* ctx)
         rect_(c, fx - 1.5f, fyTop, 3, fyBot - fyTop, 0x444B55FF, 0x000000FF, 1.0);
         if (has) {
             const bool fHot = inside(fx - 14, fyTop - 8, 28, fyBot - fyTop + 16);
-            if (fHot && canvasClicked && leftBtn == 0) {
+            if (fHot && canvasClicked && leftBtn == 0 && !s_colMode) {
                 s_dragFader = i;
                 s_dragT = ch ? std::clamp(ch->faderTapered, 0.0, 1.0) : 0.0;
                 side.virtualTouch(i, true, now, offTest);
@@ -2611,7 +2653,7 @@ void drawUf8UadVector(ImGui_Context* ctx)
     {
         constexpr float cx = 918, cy = 200, r = 32;
         const bool hot = inside(cx - r, cy - r, 2 * r, 2 * r);
-        if (hot && canvasClicked && leftBtn == 0) { s_dragPot = 8; s_potY = my; s_potTurned = false; }
+        if (hot && canvasClicked && leftBtn == 0 && !s_colMode) { s_dragPot = 8; s_potY = my; s_potTurned = false; }
         circle_(c, cx, cy, r, 0x14181EFF,
                 s_dragPot == 8 ? 0xAACCFFFF : hot ? 0x6688AAFF : 0x6FA86FFF);
         circle_(c, cx, cy, r - 3, 0x252A33FF, 0x555A66FF);
@@ -2678,7 +2720,7 @@ void drawUf8UadVector(ImGui_Context* ctx)
             drawTextCentered_(c, mmid, cy0 + 10, 0xE0E4EAFF, "MONITOR");
             const float kx = mmid, ky = cy0 + 62, kr = 28.0f;
             const bool kHot = inside(kx - kr, ky - kr, 2 * kr, 2 * kr);
-            if (kHot && canvasClicked && leftBtn == 0) { s_dragPot = 8; s_potY = my; s_potTurned = false; }
+            if (kHot && canvasClicked && leftBtn == 0 && !s_colMode) { s_dragPot = 8; s_potY = my; s_potTurned = false; }
             circle_(c, kx, ky, kr, 0x14181EFF,
                     s_dragPot == 8 ? 0xAACCFFFF : kHot ? 0x6688AAFF : 0x6FA86FFF);
             circle_(c, kx, ky, kr * 0.78f, 0x383C44FF, 0x6A6E78FF);
@@ -2846,8 +2888,51 @@ void drawUf8UadVector(ImGui_Context* ctx)
 
     if (!hoverDesc.empty()) ImGui_SetTooltip(ctx, hoverDesc.c_str());
     ImGui_PopFont(ctx);
-    ImGui_Text(ctx, s_selDesc.empty() ? "Click a key, fader or channel to see what it does on this layer."
-                                      : s_selDesc.c_str());
+    if (!s_colMode) {
+        ImGui_Text(ctx, s_selDesc.empty() ? "Click a key, fader or channel to see what it does on this layer."
+                                          : s_selDesc.c_str());
+        return;
+    }
+    // The picked key's colour: the 8 of the palette, or the key's own.
+    if (s_colKey < 0 || uadLayer < 0) {
+        ImGui_Text(ctx, "Click a key on the UF8 above to set its colour.");
+        return;
+    }
+    std::string nm;
+    if (s_colKey >= 0x18 && s_colKey <= 0x1F) nm = "Soft-key " + std::to_string(s_colKey - 0x18 + 1);
+    else if (s_colKey >= 0x48 && s_colKey <= 0x4F) nm = "SEND/PLUG-IN " + std::to_string(s_colKey - 0x48 + 1);
+    else if (s_colKey >= 0x68 && s_colKey <= 0x6D) nm = std::string("Bank key ") + midicc::pageKey(s_colKey - 0x68);
+    else if (s_colKey >= 0x40 && s_colKey <= 0x42) nm = "LAYER " + std::to_string(s_colKey - 0x40 + 1);
+    else nm = midicc::keyName(s_colKey);
+    auto it = uadCol.find(s_colKey);
+    ImGui_Text(ctx, ("Colour of " + nm).c_str());
+    for (int i = 0; i < midicc::kColourCount; ++i) {
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        char id[32];
+        snprintf(id, sizeof(id), "##uad_col_%d", i);
+        int flags = 0;
+        double w = (it != uadCol.end() && it->second == i) ? 30.0 : 22.0, h = w;
+        if (ImGui_ColorButton(ctx, id, static_cast<int>((midicc::kColours[i] << 8) | 0xFF), &flags, &w, &h))
+            uf8::bindings::setUadColour(uadLayer, s_colKey, i);
+    }
+    ImGui_SameLine(ctx, nullptr, nullptr);
+    if (ImGui_Button(ctx, "Own colour##uad_col_own", nullptr, nullptr)) uf8::bindings::setUadColour(uadLayer, s_colKey, -1);
+    // Strip keys: the same colour for all eight in one go.
+    const bool strip = (s_colKey >= 0x18 && s_colKey <= 0x1F) || (s_colKey >= 0x20 && s_colKey <= 0x37)
+                    || (s_colKey >= 0x48 && s_colKey <= 0x4F);
+    if (strip) {
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        if (ImGui_Button(ctx, "Same for all 8##uad_col_all", nullptr, nullptr)) {
+            const int c = it != uadCol.end() ? it->second : -1;
+            for (int k = 0; k < 8; ++k) {
+                int id = s_colKey;
+                if (s_colKey >= 0x20 && s_colKey <= 0x37) id = 0x20 + k * 3 + (s_colKey - 0x20) % 3;
+                else if (s_colKey >= 0x48) id = 0x48 + k;
+                else id = 0x18 + k;
+                uf8::bindings::setUadColour(uadLayer, id, c);
+            }
+        }
+    }
 }
 
 // The MIDI CC layer's UF8, the whole surface. Two modes:

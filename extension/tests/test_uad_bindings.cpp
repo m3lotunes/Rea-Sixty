@@ -62,6 +62,15 @@ int main()
     EXPECT((bnd::uadQuick2(2) == std::vector<std::string>{"0/in/2", "0/aux/1"}));
     EXPECT(bnd::uadQuick2(0).empty());
 
+    // Key colours persist in the same "uad" block; -1 takes one back.
+    bnd::setUadColour(2, 0x20, 2);
+    bnd::setUadColour(2, 0x6E, 5);
+    bnd::setUadColour(2, 0x18, 3);
+    bnd::setUadColour(2, 0x18, -1);
+    bnd::load();
+    EXPECT((bnd::uadColours(2) == std::map<int, int>{{0x20, 2}, {0x6E, 5}}));
+    EXPECT(bnd::uadColours(0).empty());
+
     // Reload from disk.
     bnd::setActiveLayer(2);
     bnd::load();

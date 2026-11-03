@@ -41328,6 +41328,12 @@ static void uadTick_()
             if (uf8::bindings::layerKind(l) == uf8::bindings::LayerKind::Uad) ql = l;
         if (ql >= 0) g_uadSide.setQuick2(uf8::bindings::uadQuick2(ql));
         g_uadSide.setTouchSelects(g_touchSelectsChannel.load());
+        if (ql >= 0) {
+            std::map<int, std::uint32_t> col;
+            for (const auto& [id, c] : uf8::bindings::uadColours(ql))
+                if (c >= 0 && c < midicc::kColourCount) col[id] = midicc::kColours[c];
+            g_uadSide.setColours(col);
+        }
     }
     if (idx != g_uadIdx) {
         const bool entered = idx >= 0 && g_uadIdx < 0;

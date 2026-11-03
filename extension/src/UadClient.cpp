@@ -277,6 +277,12 @@ void Side::setQuick2(const std::vector<std::string>& ids)
     surf_.setQuick2(ids);
 }
 
+void Side::setColours(const std::map<int, std::uint32_t>& c)
+{
+    std::lock_guard<std::mutex> lk(mx_);
+    surf_.setColours(c);
+}
+
 void Side::setTouchSelects(bool on)
 {
     std::lock_guard<std::mutex> lk(mx_);
