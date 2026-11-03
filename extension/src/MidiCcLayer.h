@@ -244,6 +244,55 @@ inline Layer factoryLayer()
     return L;
 }
 
+// The second factory set, "Controller" (Frank 03.11.2026): every control on a CC the
+// MIDI spec leaves free, so nothing collides with what a synth already answers to
+// (1 mod, 7 volume, 10 pan, 11 expression, 64.. pedals, 120..127 channel mode).
+// One MIDI channel per page (V-POT = 1, page 1 = 2 .. page 5 = 6), the same CC
+// numbers on each; the keys that are the same on every page, and the encoder, on
+// channel 16. Free CCs: 3, 9, 14, 15, 20..31, 85..90, 102..119; general purpose
+// 16..19, 80..83; sound controllers 75..79 for the last few keys on channel 16.
+inline Layer controllerLayer()
+{
+    Layer L;
+    L.outputs = {""};
+    L.defaultChannel = 1;
+    static const int kSoftCc[8] = {16, 17, 18, 19, 80, 81, 82, 83};
+    for (int p = 0; p < kPages; ++p) {
+        Page& pg = L.pages[static_cast<std::size_t>(p)];
+        for (int i = 0; i < kStrips; ++i) {
+            auto set = [&](Control& c, int n, int col) { c.channel = p + 1; c.number = n; c.colour = col; };
+            set(pg.fader[i], 20 + i, 7);              // white
+            set(pg.vpot[i], 102 + i, 5);              // blue
+            set(pg.push[i], 110 + i, 5);
+            set(pg.soft[i], kSoftCc[i], 3);           // green
+            set(pg.sendPlugin[i], i, 1);              // orange, Program Change
+        }
+        pg.foot[0].channel = p + 1; pg.foot[0].number = 64; pg.foot[0].name = "Sustain";
+        pg.foot[0].behaviour = Behaviour::Hold;
+        pg.foot[1].channel = p + 1; pg.foot[1].number = 67; pg.foot[1].name = "Soft";
+        pg.foot[1].behaviour = Behaviour::Hold;
+    }
+    auto key = [&](int id, int n, int col) {
+        Control c; c.channel = 16; c.number = n; c.colour = col;
+        L.keys[id] = c;
+    };
+    for (int s = 0; s < kStrips; ++s) {
+        key(0x20 + s * 3, 102 + s, 2);                // SOLO yellow
+        key(0x21 + s * 3, 110 + s, 0);                // CUT red
+        key(0x22 + s * 3, 20 + s, 4);                 // SEL cyan
+    }
+    static const int kPool[29] = {85, 86, 87, 88, 89, 90, 118, 119, 3, 9, 14, 15, 28, 29, 30, 31,
+                                  16, 17, 18, 19, 80, 81, 82, 83, 75, 76, 77, 78, 79};
+    int n = 0;
+    L.encoder.channel = 16; L.encoder.number = kPool[n++];
+    static const int kKeys[28] = {0x76, 0x73, 0x74, 0x75, 0x6E, 0x6F, 0x70, 0x71, 0x72,
+                                  0x43, 0x44, 0x45, 0x50, 0x51, 0x54,
+                                  0x58, 0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x78, 0x79,
+                                  0x7A, 0x7B, 0x7C, 0x7D, 0x7E};
+    for (int id : kKeys) key(id, kPool[n++], 7);       // white
+    return L;
+}
+
 // ---- fader, V-Pot, keys ------------------------------------------------------------
 
 inline int faderToValue(int pb, bool hr)

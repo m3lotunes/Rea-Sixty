@@ -1,6 +1,7 @@
 // MidiCcLayer: fader and V-Pot values, keys, the messages that go out, what comes
 // back (14 bit included), the hand-wins rule and the CC lanes in items.
 
+#include <map>
 #include "MidiCcLayer.h"
 
 #include <cstdio>
@@ -205,6 +206,30 @@ int main()
                 if (hiResActive(static_cast<Kind>(k), c)) EXPECT(++seen[c.number + 32] == 1);
             }
         }
+    }
+
+    // The Controller factory set: per channel every CC once, none the MIDI spec
+    // reserves (feet keep sustain / soft on purpose), every key it names assignable.
+    {
+        const Layer L = controllerLayer();
+        std::map<int, int> seen;   // channel * 128 + cc -> count
+        auto use = [&](Kind k, const Control& c) {
+            if (!assigned(c) || k == Kind::SendPlugin || k == Kind::Foot) return;
+            const int ch = channelOf(c, L.defaultChannel);
+            EXPECT(++seen[ch * 128 + c.number] == 1);
+            const int n = c.number;
+            EXPECT(n != 0 && n != 1 && n != 6 && n != 7 && n != 10 && n != 11 && n != 32 && n != 38);
+            EXPECT(!(n >= 64 && n <= 69) && !(n >= 96 && n <= 101) && n < 120);
+        };
+        for (int p = 0; p < kPages; ++p) {
+            EXPECT(L.pages[p].fader[0].channel == p + 1);
+            for (int k = 0; k < kKindCount; ++k)
+                for (int i = 0; i < countOf(static_cast<Kind>(k)); ++i)
+                    use(static_cast<Kind>(k), L.pages[p].at(static_cast<Kind>(k), i));
+        }
+        for (const auto& [id, c] : L.keys) { EXPECT(keyAssignable(id)); EXPECT(c.channel == 16); use(Kind::Soft, c); }
+        use(Kind::VPot, L.encoder);
+        EXPECT(L.keys.size() == 52 && L.encoder.channel == 16);
     }
 
     // Every other key and the channel encoder (03.11.2026).

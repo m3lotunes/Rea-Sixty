@@ -226,15 +226,29 @@ bool drawPresets_(ImGui_Context* ctx, int layer, midicc::Layer& L)
             s_presetSel = -1;
         }
     }
+    // Two factory sets: Instrument (the CCs synths and libraries answer to) and
+    // Controller (free CCs only, one channel per page). Connections stay.
     ImGui_SameLine(ctx, nullptr, nullptr);
-    if (ImGui_Button(ctx, "Factory##cc_pre_default", nullptr, nullptr)) {
-        midicc::Layer f = midicc::factoryLayer();
-        f.outputs = L.outputs;             // where the MIDI goes is not a CC set
-        f.inputDevice = L.inputDevice;
-        L = f;
-        dirty = true;
+    ImGui_SetNextItemWidth(ctx, 190.0);
+    if (ImGui_BeginCombo(ctx, "##cc_pre_factory", "Factory set...", nullptr)) {
+        auto apply = [&](midicc::Layer f) {
+            f.outputs = L.outputs;
+            f.inputDevice = L.inputDevice;
+            f.followItems = L.followItems;
+            L = f;
+            dirty = true;
+        };
+        bool a = false, b = false;
+        if (ImGui_Selectable(ctx, "Instrument: Mod, Expression, Volume, Cutoff ...##cc_fac_i", &a, nullptr, nullptr, nullptr))
+            apply(midicc::factoryLayer());
+        tip_(ctx, "Faders on the CCs synths and sample libraries answer to; only the V-POT page is set.");
+        if (ImGui_Selectable(ctx, "Controller: free CCs, one channel per page##cc_fac_c", &b, nullptr, nullptr, nullptr))
+            apply(midicc::controllerLayer());
+        tip_(ctx, "Every control on a CC MIDI leaves free. Page V-POT = channel 1 ... page 5 = channel 6, "
+                  "same CC numbers on each. SOLO, CUT, SEL, the other keys and the encoder on channel 16.");
+        ImGui_EndCombo(ctx);
     }
-    tip_(ctx, "Back to the factory CC set. Output and input stay.");
+    tip_(ctx, "Replaces this layer's CC set with a factory one. Connections stay.");
 
     if (ImGui_BeginPopupModal(ctx, "Save CC preset###cc_pre_modal", nullptr, nullptr)) {
         ImGui_PushItemWidth(ctx, 280);
