@@ -83,6 +83,7 @@ bool allowedProperty(const std::string& p)
 {
     const auto s = split(p);
     const std::size_t n = s.size();
+    if (n == 1) return s[0] == "TalkbackOn";
     if (n < 3 || s[0] != "devices") return false;
     const std::string& name = s.back();
     if (n == 3) return oneOf(name, {"AltMonSelection", "TalkbackMaster"});
@@ -134,11 +135,18 @@ void Surface::write_(const std::string& prop, const std::string& json, std::int6
     if (!allowedProperty(prop)) return;
     // Nothing while the device is gone: the engine keeps its old tree (measured).
     const auto seg = split(prop);
-    const int d = std::atoi(seg[1].c_str());
-    if (d < 0 || d >= static_cast<int>(m_.devices.size()) || !devOk_(m_.devices[static_cast<std::size_t>(d)])) return;
-    // The offline test (Settings' virtual UF8) never switches phantom power.
-    if (!m_.devices[static_cast<std::size_t>(d)].online && prop.size() >= 4
-        && prop.compare(prop.size() - 4, 4, "/48V") == 0) return;
+    if (seg.size() == 1) {
+        // A root property (talkback): needs a device the surface may write to.
+        bool ok = false;
+        for (const auto& D : m_.devices) ok = ok || devOk_(D);
+        if (!ok) return;
+    } else {
+        const int d = std::atoi(seg[1].c_str());
+        if (d < 0 || d >= static_cast<int>(m_.devices.size()) || !devOk_(m_.devices[static_cast<std::size_t>(d)])) return;
+        // The offline test (Settings' virtual UF8) never switches phantom power.
+        if (!m_.devices[static_cast<std::size_t>(d)].online && prop.size() >= 4
+            && prop.compare(prop.size() - 4, 4, "/48V") == 0) return;
+    }
     Pending& p = pending_[prop];
     p.json = json;
     if (now - p.lastSentMs >= kWriteMs) {
@@ -304,6 +312,19 @@ void Surface::soft_(int key, bool pressed, std::int64_t now, Out& out)
         if (key == 0) mode_ = PotMode::Pan;
         if (key == 1) mode_ = PotMode::Send;
         if (key == 2) mode_ = PotMode::Preamp;
+        return;
+    }
+    if (softBank_ == 1 && key == 4) {                           // TALKBACK, as in Console:
+        // a tap latches it on (or off again), a hold talks only while held.
+        if (pressed) {
+            talkDownMs_ = now;
+            talkWasOn_ = m_.talkbackOn;
+            talkHeld_ = true;
+            if (!talkWasOn_) write_("/TalkbackOn", "true", now, out);
+        } else if (talkHeld_) {
+            talkHeld_ = false;
+            if (talkWasOn_ || now - talkDownMs_ >= kTalkHoldMs) write_("/TalkbackOn", "false", now, out);
+        }
         return;
     }
     if (softBank_ == 1) {                                       // the monitor
@@ -521,6 +542,9 @@ void Surface::paint(std::int64_t now, Out& out)
                 lit = on ? 2 : 1;
                 break;
             }
+        } else if (softBank_ == 1 && s == 4) {
+            v.slotLabel = "TALK";
+            lit = m_.talkbackOn ? 2 : 1;
         } else if (softBank_ == 2 && s < 5 && selected_ >= 0) {
             const uad::Input* in = m_.input(strips_[static_cast<std::size_t>(selected_)]);
             if (in && in->hasPreamp) {
@@ -584,6 +608,7 @@ void Surface::paint(std::int64_t now, Out& out)
 std::vector<std::string> Surface::wantedSubscriptions() const
 {
     std::vector<std::string> w;
+    w.push_back("/TalkbackOn");
     for (std::size_t di = 0; di < m_.devices.size(); ++di) {
         const uad::Device& D = m_.devices[di];
         const std::string dev = uad::Model::devicePath(static_cast<int>(di));

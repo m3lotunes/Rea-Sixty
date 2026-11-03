@@ -171,6 +171,12 @@ std::vector<std::string> Model::onMessage(const std::string& json)
     const std::vector<std::string> seg = split(path);
     if (seg.empty()) return {};
 
+    // The root's talkback switch: "/TalkbackOn" (get) or "/TalkbackOn/value".
+    if (seg[0] == "TalkbackOn" && (seg.size() == 1 || (seg.size() == 2 && seg[1] == "value"))) {
+        if (setBool(talkbackOn, data)) ++gen;
+        return {};
+    }
+
     // "<node>/<Property>/value": a subscribe answer, a push or a set ack.
     if (seg.back() == "value" && seg.size() >= 3) {
         std::vector<std::string> node(seg.begin(), seg.end() - 2);

@@ -104,6 +104,7 @@ public:
     std::vector<std::string> onMessage(const std::string& json);
 
     std::vector<Device> devices;
+    bool talkbackOn = false;         // /TalkbackOn, the Console's TALKBACK button
     std::uint32_t gen = 0;           // bumped by every change
 
     // The channels in Console order: per device the visible inputs (Active, enabled

@@ -300,6 +300,7 @@ Status Side::status()
     st.softBank = surf_.softBank();
     st.mode     = static_cast<int>(surf_.mode());
     st.send     = surf_.send();
+    st.talkbackOn = model_.talkbackOn;
     for (const uad::Device& D : model_.devices) {
         const int o = D.monitorOutput();
         if (o < 0) continue;

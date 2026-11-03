@@ -2350,9 +2350,10 @@ void drawUf8UadVector(ImGui_Context* ctx)
     static const char* const kModeDesc[3] = {
         "V-Pots set the pan", "V-Pots set the send picked with SEND/PLUG-IN 1-6",
         "V-Pots set the preamp gain (whole dB, channels with a preamp)"};
-    static const char* const kMon[4] = {"ALT", "DIM", "MONO", "MUTE"};
-    static const char* const kMonDesc[4] = {
-        "monitor: ALT speakers on/off", "monitor: dim", "monitor: mono", "monitor: mute"};
+    static const char* const kMon[5] = {"ALT", "DIM", "MONO", "MUTE", "TALK"};
+    static const char* const kMonDesc[5] = {
+        "monitor: ALT speakers on/off", "monitor: dim", "monitor: mono", "monitor: mute",
+        "talkback: tap = on/off, hold = on while held"};
     static const char* const kPre[5] = {"48V", "PAD", "PHASE", "LOW CUT", "HI-Z"};
     static const char* const kPreDesc[5] = {
         "48V phantom power of the selected channel, only after holding 0.5 s",
@@ -2371,8 +2372,10 @@ void drawUf8UadVector(ImGui_Context* ctx)
         // Top soft key: its function in the current soft-key bank.
         if (st.softBank == 0 && i < 3) {
             tile(sx + 6, 12, kStripW - 12, 22, kModes[i], kModeDesc[i], true, st.mode == i, 0x18 + i);
-        } else if (st.softBank == 1 && i < 4) {
-            tile(sx + 6, 12, kStripW - 12, 22, kMon[i], kMonDesc[i], true, false, 0x18 + i);
+        } else if (st.softBank == 1 && i < 5) {
+            const bool monOn = i == 1 ? st.monitorDim : i == 2 ? st.monitorMono : i == 3 ? st.monitorMute
+                             : i == 4 ? st.talkbackOn : false;
+            tile(sx + 6, 12, kStripW - 12, 22, kMon[i], kMonDesc[i], true, monOn, 0x18 + i);
         } else if (st.softBank == 2 && i < 5) {
             tile(sx + 6, 12, kStripW - 12, 22, kPre[i], kPreDesc[i], st.selectedPreamp, false, 0x18 + i);
         } else {
@@ -2529,7 +2532,7 @@ void drawUf8UadVector(ImGui_Context* ctx)
         struct B { float x, y, w; const char* lbl; const char* desc; };
         const B banks[6] = {
             {852, 22, 42, "V-POT", "soft keys: V-Pot mode PAN / SEND / INPUTS"},
-            {898, 22, 42, "1",     "soft keys: monitor ALT / DIM / MONO / MUTE"},
+            {898, 22, 42, "1",     "soft keys: monitor ALT / DIM / MONO / MUTE / TALK"},
             {944, 22, 41, "2",     "soft keys: preamp of the selected channel"},
             {852, 46, 42, "3",     ""},
             {898, 46, 42, "4",     ""},

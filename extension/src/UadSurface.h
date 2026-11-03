@@ -42,6 +42,7 @@ enum class PotMode : std::uint8_t { Pan, Send, Preamp };
 constexpr int kTouchQuietMs = 150;   // main.cpp's kTouchDebounceQuiet
 constexpr int kWriteMs      = 16;    // one write per path per window [Ref: open-apollo]
 constexpr int kHandHoldMs   = 350;   // the hand wins over the engine's echo this long
+constexpr int kTalkHoldMs = 400;     // TALK held this long = talk only while held
 constexpr int kPhantomHoldMs = 500;  // 48V only after holding the key this long
 constexpr int kSoftBanks    = 3;     // V-POT (modes), 1 Monitor, 2 Preamp
 
@@ -127,6 +128,8 @@ private:
     int          phantomKey_ = -1;             // soft key held for 48V
     std::int64_t phantomDownMs_ = 0;
     bool         phantomFired_ = false;
+    std::int64_t talkDownMs_ = 0;              // TALK soft key: tap latches, hold talks
+    bool         talkWasOn_ = false, talkHeld_ = false;
     bool         fresh_ = true;
 };
 
