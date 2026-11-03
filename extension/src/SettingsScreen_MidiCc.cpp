@@ -464,10 +464,13 @@ bool reasixty_drawLedLook(ImGui_Context* ctx, ledlook::Look& l, const char* tag)
 {
     bool dirty = false;
     auto row = [&](const char* label, std::uint32_t& rgb, int& bri, const char* part) {
+        // From where the row starts (a group beside the UF8 starts far right):
+        // SetCursorPosX counts from the window's edge, not the group's.
+        const double x0 = ImGui_GetCursorPosX(ctx);
         ImGui_AlignTextToFramePadding(ctx);
         ImGui_Text(ctx, label);
         ImGui_SameLine(ctx, nullptr, nullptr);
-        ImGui_SetCursorPosX(ctx, 80.0);
+        ImGui_SetCursorPosX(ctx, x0 + 80.0);
         char btnId[48], popId[48];
         snprintf(btnId, sizeof(btnId), "##ledcur_%s_%s", tag, part);
         snprintf(popId, sizeof(popId), "ledpal_%s_%s", tag, part);
