@@ -2547,7 +2547,8 @@ void drawUf8UadVector(ImGui_Context* ctx)
              "V-Pots set send " + (sn.empty() ? std::string(n) : sn) + "; mode SEND",
              !sn.empty(), st.mode == 1 && st.send == k, 0x48 + k);
     }
-    tile(13, 260, 50, 22, "PLUGIN", "", false);
+    tile(13, 260, 50, 22, "PLUGIN", "PLUG-IN mode on / off: the SEL channel's plug-ins on the V-Pots",
+         true, st.mode == 3, 0x50);
     tile(67, 260, 50, 22, "CHANNEL", "", false);
     groupLabel(65, 286, "PAGE");
     {

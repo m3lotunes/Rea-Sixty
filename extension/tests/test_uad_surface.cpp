@@ -407,6 +407,21 @@ int main()
         EXPECT(!uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/parameters/0/StringValue"));
         EXPECT(!uadsurf::allowedProperty("/devices/0/inputs/0/effects/2/Preset"));
         EXPECT(uadsurf::allowedProperty("/TalkbackOn") && !uadsurf::allowedProperty("/Dirty"));
+        // The PLUGIN key: back to the mode before, and in again.
+        r.key(0x50);
+        EXPECT(r.surf.mode() == uadsurf::PotMode::Pan);
+        r.key(0x50);
+        EXPECT(r.surf.mode() == uadsurf::PotMode::Plugin);
+        // Touch selects channel: off = a touch leaves SEL alone, on = it selects.
+        r.press(uf8sim::touch(3, true));
+        EXPECT(r.surf.selected() == 0);
+        r.press(uf8sim::touch(3, false));
+        r.paint(300);
+        r.surf.setTouchSelects(true);
+        r.press(uf8sim::touch(3, true));
+        EXPECT(r.surf.selected() == 3);
+        r.press(uf8sim::touch(3, false));
+        r.paint(300);
         // a strip id survives the round trip
         uad::Strip back;
         EXPECT(uad::Model::parseStripId(uad::Model::stripId(all[1]), back) && back == all[1]);

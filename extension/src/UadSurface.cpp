@@ -260,6 +260,10 @@ bool Surface::fromUf8(const uf8frames::Frame& f, std::int64_t now, Out& out)
         Touch& t = touch_[static_cast<std::size_t>(s)];
         if (f.b[4] != 0) {
             t.releasePending = false;
+            if (touchSelects_ && !t.down) {
+                const int idx = stripAt_(s);
+                if (idx >= 0 && idx != selected_) { selected_ = idx; slot_ = -1; paramPage_ = 0; }
+            }
             if (!t.down) {
                 t.down = true;
                 out.uf8.push_back(uf8fader::limp(static_cast<std::uint8_t>(s)));
@@ -386,6 +390,11 @@ void Surface::key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out)
         paramPage_ = std::clamp(paramPage_ + (id == 0x53 ? 1 : -1), 0, maxPage);
         return;
     }
+    if (id == 0x50) {                                           // PLUGIN: into PLUG-IN mode and back
+        if (mode_ == PotMode::Plugin) { mode_ = beforePlugin_; slot_ = -1; }
+        else { beforePlugin_ = mode_; mode_ = PotMode::Plugin; }
+        return;
+    }
     if (id == 0x43 || id == 0x44) {                             // QUICK 1 / QUICK 2: the view
         const int q = id - 0x43;
         if (q == quick_) return;
@@ -415,7 +424,7 @@ void Surface::key_(std::uint8_t id, bool pressed, std::int64_t now, Out& out)
         bank_ = std::clamp(bank_ + (id == 0x79 ? 1 : -1), 0, maxBank);
         return;
     }
-    if (id == 0x6E) { mode_ = PotMode::Pan; return; }           // PAN
+    if (id == 0x6E) { mode_ = PotMode::Pan; slot_ = -1; return; }   // PAN
     if (id == 0x76) {                                           // encoder push: monitor mute
         for (std::size_t di = 0; di < m_.devices.size(); ++di) {
             const uad::Device& D = m_.devices[di];
@@ -435,7 +444,8 @@ void Surface::soft_(int key, bool pressed, std::int64_t now, Out& out)
         if (key == 0) mode_ = PotMode::Pan;
         if (key == 1) mode_ = PotMode::Send;
         if (key == 2) mode_ = PotMode::Preamp;
-        if (key == 3) mode_ = PotMode::Plugin;
+        if (key == 3 && mode_ != PotMode::Plugin) { beforePlugin_ = mode_; mode_ = PotMode::Plugin; }
+        if (key < 3) slot_ = -1;
         return;
     }
     if (softBank_ == 1 && key == 4) {                           // TALKBACK, as in Console:
@@ -751,6 +761,7 @@ void Surface::paint(std::int64_t now, Out& out)
     } else {
         for (int k = 0; k < 8; ++k) lamp(sp[k], k >= sendCount ? 0 : (mode_ == PotMode::Send && k == send_) ? 2 : 1);
     }
+    lamp(G::Plugin, mode_ == PotMode::Plugin ? 2 : 1);
     lamp(G::Quick1, quick_ == 0 ? 2 : 1);
     lamp(G::Quick2, quick_ == 1 ? 2 : 1);
     {
@@ -767,7 +778,7 @@ void Surface::paint(std::int64_t now, Out& out)
     lamp(G::BankRight, bank_ < maxB ? 1 : 0);
     lamp(G::Pan, mode_ == PotMode::Pan ? 2 : 1);
     lamp(G::Fine, fine_ ? 2 : 1);
-    for (G g : {G::Quick3, G::Channel, G::Plugin,
+    for (G g : {G::Quick3, G::Channel,
                 G::Flip, G::AutoOff, G::AutoRead, G::AutoWrite, G::AutoTrim, G::AutoLatch, G::AutoTouch,
                 G::Norm, G::Rec, G::Auto, G::Nav, G::Nudge, G::Focus,
                 G::ZoomUp, G::ZoomLeft, G::ZoomCenter, G::ZoomRight, G::ZoomDown})

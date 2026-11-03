@@ -277,6 +277,12 @@ void Side::setQuick2(const std::vector<std::string>& ids)
     surf_.setQuick2(ids);
 }
 
+void Side::setTouchSelects(bool on)
+{
+    std::lock_guard<std::mutex> lk(mx_);
+    surf_.setTouchSelects(on);
+}
+
 void Side::invalidate()
 {
     std::lock_guard<std::mutex> lk(mx_);

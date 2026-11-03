@@ -78,6 +78,8 @@ public:
     // QUICK 2's channels (bindings.json, Layer::uadQuick2, as Model::stripId).
     // QUICK 1 is every channel in Console order.
     void setQuick2(const std::vector<std::string>& ids) { quick2_ = ids; }
+    // Rea-Sixty's "Touch selects channel" (Settings → General): a fader touch is SEL.
+    void setTouchSelects(bool on) { touchSelects_ = on; }
     int  quick() const { return quick_; }           // 0 = QUICK 1, 1 = QUICK 2
     const std::vector<uad::Strip>& strips() const { return strips_; }   // on the faders, in order
 
@@ -150,6 +152,8 @@ private:
     std::vector<std::string> quick2_;
     std::array<int, 2> quickBank_{};           // each view keeps its own bank
     int          slot_ = -1, paramPage_ = 0;   // PLUG-IN: edited slot, parameter page
+    bool         touchSelects_ = false;
+    PotMode      beforePlugin_ = PotMode::Pan; // the PLUGIN key returns here
 };
 
 }  // namespace uadsurf

@@ -41246,6 +41246,7 @@ static void uadTick_()
         for (int l = 0; ql < 0 && l < 3; ++l)
             if (uf8::bindings::layerKind(l) == uf8::bindings::LayerKind::Uad) ql = l;
         if (ql >= 0) g_uadSide.setQuick2(uf8::bindings::uadQuick2(ql));
+        g_uadSide.setTouchSelects(g_touchSelectsChannel.load());
     }
     if (idx != g_uadIdx) {
         const bool entered = idx >= 0 && g_uadIdx < 0;
