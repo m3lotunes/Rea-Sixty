@@ -550,6 +550,7 @@ void Surface::pot_(int s, int d, std::int64_t now, Out& out)
         if (it != pending_.end() && now - it->second.lastSentMs < kHandHoldMs)
             base = std::strtod(it->second.json.c_str(), nullptr);
         write_(prop, num(std::clamp(base + d * (fine_ ? 0.002 : 0.01), 0.0, 1.0)), now, out);
+        potShowUntil_[static_cast<std::size_t>(s)] = now + kPotShowMs;
         return;
     }
     const int idx = stripAt_(s);
@@ -744,7 +745,16 @@ void Surface::paint(std::int64_t now, Out& out)
             // The V-Pots belong to the SEL channel's plug-ins, not to the strip's channel.
             const PotView pv = pluginView(s);
             v.valueLine = uf8ValueLine(utf8ToLatin1(pv.label), utf8ToLatin1(pv.value));
-            lower       = utf8ToLatin1(pv.value);
+            // The UF8 shows the value line only in some views; the lower scribble
+            // line always. So the name goes there (the plug-in in the overview, the
+            // parameter on a slot), and a turned V-Pot shows its value for a moment.
+            // On / off in the overview is the ring.
+            if (!selIn_())
+                lower = "SEL ch";
+            else if (slot_ >= 0 && pv.has && potShowUntil_[i] > now)
+                lower = utf8ToLatin1(pv.value);
+            else
+                lower = abbreviateTrackName_(pv.label, 8, TNM_SmartAbbrev, /*foldLatin1*/ true);
             if (pv.has) {
                 mode[i] = 0x01;
                 bar[i] = uf8::vpotPosUnipolar(std::clamp(pv.norm, 0.0, 1.0));

@@ -43,6 +43,7 @@ enum class PotMode : std::uint8_t { Pan, Send, Preamp, Plugin };
 constexpr int kTouchQuietMs = 150;   // main.cpp's kTouchDebounceQuiet
 constexpr int kWriteMs      = 16;    // one write per path per window [Ref: open-apollo]
 constexpr int kHandHoldMs   = 350;   // the hand wins over the engine's echo this long
+constexpr int kPotShowMs    = 1500;  // PLUG-IN: a turned V-Pot shows its value this long, then its name
 constexpr int kTalkHoldMs = 500;     // TALK held this long = talk only while held (UA manual: 0.5 s)
 constexpr int kWindowHoldMs = 500;   // SEND/PLUG-IN held this long in PLUG-IN mode = the plug-in's window
 constexpr int kPhantomHoldMs = 500;  // 48V only after holding the key this long
@@ -139,6 +140,7 @@ private:
     std::array<Touch, 8>        touch_{};
     std::array<std::int64_t, 8> handUntil_{};
     std::array<double, 8>       handTapered_{};
+    std::array<std::int64_t, 8> potShowUntil_{};   // PLUG-IN: lower line shows the value until
     std::array<Cache, 8>        cache_{};
     std::array<std::uint16_t, 8> lastBar_{};
     std::array<std::uint8_t, 8>  lastMode_{};

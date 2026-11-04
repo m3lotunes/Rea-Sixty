@@ -386,6 +386,10 @@ int main()
         auto pv = r.surf.pluginView(2);
         EXPECT(pv.has && pv.label == "UA 1176LN Legacy" && pv.value == "on");
         EXPECT(!r.surf.pluginView(0).has);
+        // The names stand on the lower scribble line (the value line is not shown
+        // in every UF8 view): the plug-in, abbreviated to its 8 cells.
+        EXPECT(r.uf8.lower[0] == "Slot 1");
+        EXPECT(!r.uf8.lower[2].empty() && r.uf8.lower[2].size() <= 8 && r.uf8.lower[2] != "on");
         r.key(0x08 + 2);                                     // push = off
         r.paint(100);
         EXPECT(!r.model.devices[0].inputs[0].effects[2].power);
@@ -396,9 +400,13 @@ int main()
         EXPECT(r.surf.pluginSlot() == 2);
         pv = r.surf.pluginView(0);
         EXPECT(pv.has && pv.label == "Input" && pv.value == "-34.92");
+        EXPECT(r.uf8.lower[0] == "Input");                    // the parameter's name
         const double before = r.model.devices[0].inputs[0].effects[2].params[0].norm;
         r.press(uf8sim::vpot(0, 5));
         r.paint(100);
+        EXPECT(r.uf8.lower[0] == r.surf.pluginView(0).value);  // turned: its value a moment
+        r.paint(uadsurf::kPotShowMs);
+        EXPECT(r.uf8.lower[0] == "Input");                    // then the name again
         EXPECT(std::fabs(r.model.devices[0].inputs[0].effects[2].params[0].norm - (before + 0.05)) < 1e-6);
         r.key(0x48 + 2);                                     // again = back to the overview
         EXPECT(r.surf.pluginSlot() == -1);
