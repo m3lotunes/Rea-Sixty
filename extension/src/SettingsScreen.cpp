@@ -2342,6 +2342,10 @@ void drawUf8UadVector(ImGui_Context* ctx)
         if (s_colMode) {
             // LED mode: every key with a lamp can be picked, active or not.
             if (clicked && uf8Key >= 0 && uf8Key != 0x76) { s_colKey = lookKey; s_uadSelDesc = std::string(label); }
+            // The soft-key banks switch here too: each bank's soft keys have
+            // their own looks (uadsurf::softLookId), so this is how to reach
+            // them (Frank 04.11.2026). The bank key is picked for its LED as well.
+            if (clicked && uf8Key >= 0x68 && uf8Key < 0x68 + uadsurf::kSoftBanks) pressKey(uf8Key);
             const bool picked = uf8Key >= 0 && lookKey == s_colKey;
             const std::uint32_t rgb = kbri > 0 ? krgb : 0;
             const uint32_t fill = rgb ? tint(rgb, kbri == ledlook::Bright ? 3 : 1, kbri == ledlook::Bright ? 4 : 3)
