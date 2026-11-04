@@ -45900,9 +45900,15 @@ void sendUf8GlobalLed(uf8::Uf8GlobalLed cell, bool on)
 // LED resolution, through the same per-cell dedup. For the MIDI CC layer, whose
 // keys carry no binding: the SEND/PLUG-IN colours come from the CC set, and the
 // keys without a function on that layer go dark.
+// A lamp the CC layer paints itself (its key carries a CC, ccOwnsLed_) is left
+// alone unless the caller is that painter (ccOwner): the "dark" writes earlier
+// in pushUf8GlobalLeds and the CC colour at its end would otherwise alternate
+// every tick, and the key flickers.
 static void sendUf8GlobalLedDirect_(uf8::Uf8GlobalLed cell, uf8::GlobalLedState state,
-                                    const uf8::LedColour* colour = nullptr)
+                                    const uf8::LedColour* colour = nullptr,
+                                    bool ccOwner = false)
 {
+    if (!ccOwner && ccOwnsLed_(cell)) return;
     const size_t idx = static_cast<size_t>(cell);
     const int colour32 = colour ? ((int(colour->aBright) << 24) | (int(colour->bBright) << 16)
                                  | (int(colour->aDim) << 8) | int(colour->bDim))
@@ -46537,7 +46543,8 @@ void pushUf8GlobalLeds()
             const uf8::LedColour col = uf8::ledColourForTrackRgb(rgb);
             sendUf8GlobalLedDirect_(cell, bri == ledlook::Bright ? uf8::GlobalLedState::Bright
                                         : bri == ledlook::Dim    ? uf8::GlobalLedState::Dim
-                                                                 : uf8::GlobalLedState::Off, &col);
+                                                                 : uf8::GlobalLedState::Off, &col,
+                                    /*ccOwner*/ true);
         }
     }
 
