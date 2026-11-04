@@ -145,6 +145,9 @@
 #include "Protocol.h"
 #include "SetupBundle.h"
 #include "MidiCcLayer.h"
+#ifdef __APPLE__
+namespace uf8 { void macosUadConsoleToggle(); }   // macos_uad_console.mm: 360 on the UAD layer
+#endif
 #include "UadClient.h"   // the UAD Console layer (docs/uad-console-plan.md)
 #include "input_level_jsfx.h"  // generated: uf8::setup_bundle::kInputLevelJsfx{Bytes,Size}
 #include "inserts_overlay_lua.h"  // generated: uf8::setup_bundle::kInsertsOverlayLua{Bytes,Size}
@@ -27583,6 +27586,15 @@ static void onUf8InputUnit_(const uint8_t* dataIn, size_t lenIn, int unit)
             else if (cmd == 0x24)                   woke = surfaceWake_(true);
             else if (cmd == 0x20 && frameSize >= 5) (void)surfaceWake_(data[4] != 0);
             if (woke) continue;
+#ifdef __APPLE__
+            // 360: UAD Console to the front (started if need be), or back to
+            // REAPER when it is in front (macos_uad_console.mm). The release
+            // does nothing; neither reaches the REAPER layer's 360 binding.
+            if (cmd == 0x22 && frameSize >= 7 && data[3] == 0x46) {
+                if (data[5] == 0x01) uf8::macosUadConsoleToggle();
+                continue;
+            }
+#endif
             std::vector<std::vector<uint8_t>> uadOut;
             if (g_uadSide.fromUf8(fr, nowMs_(), uadOut)) {
                 for (auto& f : uadOut) {

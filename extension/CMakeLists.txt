@@ -472,6 +472,10 @@ if(APPLE)
     target_sources(reaper_uf8 PRIVATE src/macos_http.mm)
     set_source_files_properties(src/macos_http.mm PROPERTIES
         COMPILE_FLAGS "-fno-objc-arc")
+    # 360 on the UAD Console layer: UAD Console to the front / back to REAPER.
+    target_sources(reaper_uf8 PRIVATE src/macos_uad_console.mm)
+    set_source_files_properties(src/macos_uad_console.mm PROPERTIES
+        COMPILE_FLAGS "-fno-objc-arc")
 endif()
 
 # SWELL's swell-types.h #defines min/max as 2-arg macros, which collide
