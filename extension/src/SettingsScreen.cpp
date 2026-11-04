@@ -2328,7 +2328,11 @@ void drawUf8UadVector(ImGui_Context* ctx)
         const bool clicked = hot && canvasClicked && leftBtn == 0;
         // The key's lamp as the UF8 shows it, when Settings gave it a look:
         // Active while lit, Inactive while it does something, nothing else.
-        auto lkIt = uf8Key >= 0 ? uadLook.find(uf8Key) : uadLook.end();
+        // A top soft key's look is that of its function in the soft-key bank
+        // shown (uadsurf::softLookId).
+        const int lookKey = uf8Key >= 0x18 && uf8Key <= 0x1F ? uadsurf::softLookId(st.softBank, uf8Key - 0x18)
+                                                              : uf8Key;
+        auto lkIt = lookKey >= 0 ? uadLook.find(lookKey) : uadLook.end();
         std::uint32_t krgb = 0; int kbri = 0;
         if (lkIt != uadLook.end()) ledlook::resolve(lkIt->second, lit ? 2 : active ? 1 : 0, krgb, kbri);
         auto tint = [&](std::uint32_t rgb, int num, int den) {
@@ -2337,8 +2341,8 @@ void drawUf8UadVector(ImGui_Context* ctx)
         };
         if (s_colMode) {
             // LED mode: every key with a lamp can be picked, active or not.
-            if (clicked && uf8Key >= 0 && uf8Key != 0x76) { s_colKey = uf8Key; s_uadSelDesc = std::string(label); }
-            const bool picked = uf8Key >= 0 && uf8Key == s_colKey;
+            if (clicked && uf8Key >= 0 && uf8Key != 0x76) { s_colKey = lookKey; s_uadSelDesc = std::string(label); }
+            const bool picked = uf8Key >= 0 && lookKey == s_colKey;
             const std::uint32_t rgb = kbri > 0 ? krgb : 0;
             const uint32_t fill = rgb ? tint(rgb, kbri == ledlook::Bright ? 3 : 1, kbri == ledlook::Bright ? 4 : 3)
                                       : (uf8Key >= 0 && uf8Key != 0x76 ? 0x252A33FF : 0x1A1E24FF);
@@ -2933,7 +2937,10 @@ void drawUf8UadInspector(ImGui_Context* ctx)
     }
     const int id = s_uadLedKey;
     std::string nm;
-    if (id >= 0x18 && id <= 0x1F) nm = "Soft-key " + std::to_string(id - 0x18 + 1);
+    static const char* const kBankName[uadsurf::kSoftBanks] = {"V-POT", "Monitor", "Preamp"};
+    if (uadsurf::isSoftLookId(id))
+        nm = "Soft-key " + std::to_string(uadsurf::softLookSlot(id) + 1) + " (" + s_uadSelDesc + ", bank "
+           + kBankName[uadsurf::softLookBank(id)] + ")";
     else if (id >= 0x48 && id <= 0x4F) nm = "SEND/PLUG-IN " + std::to_string(id - 0x48 + 1);
     else if (id >= 0x68 && id <= 0x6D) nm = std::string("Bank key ") + midicc::pageKey(id - 0x68);
     else if (id >= 0x40 && id <= 0x42) nm = "LAYER " + std::to_string(id - 0x40 + 1);
@@ -2949,15 +2956,15 @@ void drawUf8UadInspector(ImGui_Context* ctx)
     ImGui_PopStyleColor(ctx, nullptr);
     if (reasixty_drawLedLook(ctx, l, "uad")) uf8::bindings::setUadLed(layer, id, &l);
     if (!own && ImGui_Button(ctx, "Own lamp##uad_led_own", nullptr, nullptr)) uf8::bindings::setUadLed(layer, id, nullptr);
-    const bool strip = (id >= 0x18 && id <= 0x1F) || (id >= 0x20 && id <= 0x37) || (id >= 0x48 && id <= 0x4F);
+    const bool strip = uadsurf::isSoftLookId(id) || (id >= 0x20 && id <= 0x37) || (id >= 0x48 && id <= 0x4F);
     if (strip) {
         if (!own) ImGui_SameLine(ctx, nullptr, nullptr);
         if (ImGui_Button(ctx, "Same for all 8##uad_led_all", nullptr, nullptr)) {
             for (int k = 0; k < 8; ++k) {
                 int t = id;
                 if (id >= 0x20 && id <= 0x37) t = 0x20 + k * 3 + (id - 0x20) % 3;
-                else if (id >= 0x48) t = 0x48 + k;
-                else t = 0x18 + k;
+                else if (id >= 0x48 && id <= 0x4F) t = 0x48 + k;
+                else t = uadsurf::softLookId(uadsurf::softLookBank(id), k);   // this bank's eight
                 uf8::bindings::setUadLed(layer, t, own ? nullptr : &l);
             }
         }

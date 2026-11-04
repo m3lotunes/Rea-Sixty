@@ -3336,7 +3336,9 @@ bool parseLayer_(wdl_json_element* lobj, Layer& out)
                 wdl_json_element* l = e->get_item_by_name("led");
                 if (!id || !l || !l->is_object()) continue;
                 const int k = std::atoi(id);
-                if (k < 0 || k > 127) continue;
+                // 0..127 a UF8 key; above, a top soft key in soft-key bank 1 / 2
+                // (uadsurf::softLookId).
+                if (k < 0 || k >= 0x180) continue;
                 ledlook::Look look;
                 look.activeRgb   = ledlook::hexRgb(l->get_string_by_name("a"), look.activeRgb);
                 look.inactiveRgb = ledlook::hexRgb(l->get_string_by_name("i"), look.inactiveRgb);
@@ -10259,7 +10261,7 @@ std::map<int, ledlook::Look> uadLeds(int layer)
 
 void setUadLed(int layer, int keyId, const ledlook::Look* look)
 {
-    if (layer < 0 || layer > 2 || keyId < 0 || keyId > 127) return;
+    if (layer < 0 || layer > 2 || keyId < 0 || keyId >= 0x180) return;   // see uadsurf::softLookId
     std::lock_guard<std::mutex> lk(g_cfgMutex);
     auto& m = g_cfg.layers[layer].uadLeds;
     if (!look) { if (!m.erase(keyId)) return; }

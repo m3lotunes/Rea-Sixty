@@ -42470,7 +42470,7 @@ void pushZonesForVisibleSlots()
             uf8strips::View v = tmFrame.strips[static_cast<size_t>(s)];
             if (!tmChanView) {
                 v.slotLabel = g_lastSlotLabel[s];
-                v.topKey    = g_lastTopSoftKey[s];
+                v.topKey    = -1;   // the bank's lamp, painted above: leave it
             }
             bool engaged = g_faderMotorEngaged[s].load();
             uf8strips::paintStrip(

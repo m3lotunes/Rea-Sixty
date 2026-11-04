@@ -44,7 +44,7 @@ struct View {
     std::string   faderUnit;
     std::string   valueLine;
     std::string   slotLabel;
-    int           topKey    = 0;          // 0 off, 1 dim, 2 on
+    int           topKey    = 0;          // 0 off, 1 dim, 2 on; -1 = leave the lamp as it is
     std::uint32_t topKeyRgb = 0xFFFFFF;
     bool          sel       = false;
     std::uint32_t selRgb    = 0xFFFFFF;
@@ -113,8 +113,13 @@ bool paintStrip(Cells c, const View& v, std::uint8_t st, bool touched, bool& eng
         c.slotLabel = v.slotLabel;
         send(uf8::buildPluginSlotName(st, v.slotLabel));
     }
-    if (c.topKey != v.topKey) {
-        c.topKey = v.topKey;
+    // The cache holds state and colour (main.cpp's own painters use the same
+    // composite), so a new colour in the same state is sent too: a soft-key bank
+    // whose key is dim like the one before it, in another colour (04.11.2026).
+    const std::int32_t topKey = (static_cast<std::int32_t>(v.topKey) << 28)
+                              ^ static_cast<std::int32_t>(v.topKeyRgb & 0xFFFFFF);
+    if (v.topKey >= 0 && c.topKey != topKey) {
+        c.topKey = topKey;
         leds(uf8::buildTopSoftKeyLed(st,
             v.topKey == 2 ? uf8::TopSoftKeyState::On
                           : v.topKey == 1 ? uf8::TopSoftKeyState::Dim : uf8::TopSoftKeyState::Off,

@@ -49,6 +49,16 @@ constexpr int kWindowHoldMs = 500;   // SEND/PLUG-IN held this long in PLUG-IN m
 constexpr int kPhantomHoldMs = 500;  // 48V only after holding the key this long
 constexpr int kSoftBanks    = 3;     // V-POT (modes), 1 Monitor, 2 Preamp
 
+// The LED look of a top soft key belongs to its function, and that changes with
+// the soft-key bank (PLUGIN on V-POT is MUTE on Monitor). So each bank has its
+// own key: bank 0 keeps the UF8 id 0x18..0x1F (looks saved before 04.11.2026
+// stay there), bank b adds 0x80 * b. Every other key is its UF8 id.
+constexpr int kLookIdLimit  = 0x80 * kSoftBanks;   // bindings uad.leds ids are below this
+constexpr int softLookId(int bank, int slot) { return 0x18 + slot + 0x80 * bank; }
+constexpr bool isSoftLookId(int id) { return id >= 0 && id < kLookIdLimit && (id & 0x7F) >= 0x18 && (id & 0x7F) <= 0x1F; }
+constexpr int softLookBank(int id) { return id >> 7; }
+constexpr int softLookSlot(int id) { return (id & 0x7F) - 0x18; }
+
 // Properties the surface may write, by name. Anything else is refused.
 bool allowedProperty(const std::string& propPath);
 

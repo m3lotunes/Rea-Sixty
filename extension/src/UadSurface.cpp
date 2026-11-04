@@ -796,7 +796,7 @@ void Surface::paint(std::int64_t now, Out& out)
         }
         v.topKey    = lit < 0 ? 0 : lit;
         v.topKeyRgb = softBank_ == 2 && s == 0 ? 0xFF2020 : 0xFFFFFF;    // 48V in red
-        if (const ledlook::Look* lk = look_(0x18 + s)) {
+        if (const ledlook::Look* lk = look_(softLookId(softBank_, s))) {
             // lit: 2 on, 1 does something, -1 / 0 nothing
             std::uint32_t rgb = 0; int b = 0;
             ledlook::resolve(*lk, lit < 0 ? 0 : lit, rgb, b);

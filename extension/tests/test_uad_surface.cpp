@@ -321,6 +321,25 @@ int main()
         EXPECT(r.lastSet() == "set /devices/0/outputs/4/MixToMono/value true");
         r.paint();
         EXPECT(r.uf8.topKey(0) == uf8sim::Lamp::On && r.uf8.topKey(1) == uf8sim::Lamp::On);
+        // A soft key's look belongs to its function in the bank (04.11.2026: PLUGIN's
+        // colour on V-POT stayed on MUTE in Monitor). Soft key 4 here is MUTE.
+        const auto mute = [&] { return r.uf8.colour(static_cast<std::uint8_t>(0x1F - 3)); };
+        const auto own = mute();
+        const ledlook::Look purple = ledlook::fromColour(0x9040E0);
+        r.surf.setLooks({{0x18 + 3, purple}});               // PLUGIN on V-POT: not MUTE's
+        r.paint();
+        EXPECT(mute() == own);
+        r.surf.setLooks({{uadsurf::softLookId(1, 3), purple}});   // MUTE's own
+        r.paint();
+        EXPECT(mute() != own);
+        r.key(0x68);                                         // back on V-POT: PLUGIN is not MUTE's
+        r.paint();
+        const auto plugOwn = mute();
+        r.surf.setLooks({{0x18 + 3, purple}});
+        r.paint();
+        EXPECT(mute() != plugOwn);
+        EXPECT(uadsurf::softLookId(0, 3) == 0x1B && uadsurf::isSoftLookId(0x98) && !uadsurf::isSoftLookId(0x48)
+               && uadsurf::softLookBank(0x11B) == 2 && uadsurf::softLookSlot(0x11B) == 3);
     }
 
     // ---- 9. meters ----------------------------------------------------------------------
