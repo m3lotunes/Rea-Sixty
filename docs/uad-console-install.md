@@ -52,8 +52,11 @@ Schneller, wenn GitHub auf einen Mac-Runner wartet. Jede Zeile einzeln im Termin
    ```
 
    ```bash
-   cmake --build build --target reaper_uf8 -j
+   cmake --build build --target reaper_uf8 -j 4
    ```
+
+   Nur `-j` ohne Zahl startet so viele Compiler gleichzeitig, dass der Mac am 03.11.2026 hängen
+   blieb. Mit `-j 4` nicht.
 
 5. Ergebnis: `~/ReaSixty-Build/extension/build/reaper_rea-sixty.dylib`, schon ad-hoc signiert.
    Weiter mit Abschnitt 2; beim Kopieren diesen Pfad statt `~/Downloads` nehmen. `xattr` ist bei
