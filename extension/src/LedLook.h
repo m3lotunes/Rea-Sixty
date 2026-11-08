@@ -51,7 +51,10 @@ inline void resolve(const Look& l, int state, std::uint32_t& rgb, int& bri)
 inline std::string toJson(const Look& l)
 {
     char b[128];
-    std::snprintf(b, sizeof(b), "{\"a\": \"%06X\", \"ab\": %d, \"i\": \"%06X\", \"ib\": %d, \"e\": %s}",
+    // Unqualified on purpose: on MSVC a WDL header included before this one
+    // turns snprintf into a macro (WDL_snprintf), and std::snprintf then fails
+    // on the Windows build alone (CI 2026-11-08; see HueClient.cpp).
+    snprintf(b, sizeof(b), "{\"a\": \"%06X\", \"ab\": %d, \"i\": \"%06X\", \"ib\": %d, \"e\": %s}",
                   static_cast<unsigned>(l.activeRgb & 0xFFFFFF), l.activeBri,
                   static_cast<unsigned>(l.inactiveRgb & 0xFFFFFF), l.inactiveBri,
                   l.showWhenEmpty ? "true" : "false");
